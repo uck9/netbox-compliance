@@ -1,0 +1,14 @@
+{% load helpers %}
+<div class="text-center">
+  {% if pct is not None %}
+    <h1 class="mb-0">{{ pct }}%</h1>
+    <p class="text-muted mb-2">Fleet Compliant</p>
+    <p class="mb-0">
+      <span class="text-success">{{ compliant }} compliant</span>
+      &middot;
+      <span class="text-danger">{{ failing }} failing</span>
+    </p>
+  {% else %}
+    <p class="text-muted mb-0">No devices with effective compliance measures.</p>
+  {% endif %}
+</div>

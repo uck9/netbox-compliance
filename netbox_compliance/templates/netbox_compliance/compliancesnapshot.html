@@ -1,0 +1,70 @@
+{% extends 'generic/object.html' %}
+{% load plugins %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h5 class="card-header">Snapshot</h5>
+        <table class="table table-hover attr-table">
+          <tr>
+            <th scope="row">Device</th>
+            <td>
+              {% if object.device %}
+                <a href="{{ object.device.get_absolute_url }}">{{ object.device_name }}</a>
+              {% else %}
+                {{ object.device_name }} <span class="text-muted">(device deleted)</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">Period</th>
+            <td>{{ object.period|isodate }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Overall Score</th>
+            <td>{{ object.overall_score }}%</td>
+          </tr>
+          <tr>
+            <th scope="row">Compliant</th>
+            <td>{% checkmark object.compliant %}</td>
+          </tr>
+        </table>
+      </div>
+      {% include 'inc/panels/tags.html' %}
+      {% plugin_left_page object %}
+    </div>
+    <div class="col col-md-6">
+      {% plugin_right_page object %}
+    </div>
+  </div>
+  <div class="row mb-3">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Packages</h5>
+        <table class="table table-hover">
+          <thead>
+            <tr><th>Package</th><th>Score</th></tr>
+          </thead>
+          <tbody>
+            {% for pkg in object.data.packages %}
+              <tr>
+                <td>{{ pkg.package_name }}</td>
+                <td>{{ pkg.score }}%</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="2" class="text-muted">No packages</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h5 class="card-header">Raw Data</h5>
+        <div class="card-body">
+          <pre>{{ object.data|json }}</pre>
+        </div>
+      </div>
+      {% plugin_full_width_page object %}
+    </div>
+  </div>
+{% endblock content %}

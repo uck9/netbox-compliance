@@ -1,0 +1,73 @@
+{% extends 'base/layout.html' %}
+{% load render_table from django_tables2 %}
+{% load helpers %}
+
+{% block title %}Compliance Monthly Report{% endblock %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-12">
+      <form method="get" class="row row-cols-auto g-2 align-items-end mb-3">
+        <div class="col">
+          <label class="form-label">Period</label>
+          <select name="period" class="form-select" onchange="this.form.submit()">
+            {% for p in periods %}
+              <option value="{{ p|date:'Y-m' }}" {% if p == period %}selected{% endif %}>{{ p|date:'Y-m' }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col">
+          <button type="submit" class="btn btn-primary">Go</button>
+        </div>
+        <div class="col">
+          <a class="btn btn-outline-secondary" href="?period={{ period|date:'Y-m' }}&export=csv">
+            <i class="mdi mdi-download" aria-hidden="true"></i> Export CSV
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row mb-3">
+    <div class="col col-md-4">
+      <div class="card text-center">
+        <h5 class="card-header">Devices</h5>
+        <div class="card-body"><h2>{{ total }}</h2></div>
+      </div>
+    </div>
+    <div class="col col-md-4">
+      <div class="card text-center">
+        <h5 class="card-header">Compliant</h5>
+        <div class="card-body"><h2 class="text-success">{{ compliant_count }}</h2></div>
+      </div>
+    </div>
+    <div class="col col-md-4">
+      <div class="card text-center">
+        <h5 class="card-header">Non-Compliant</h5>
+        <div class="card-body"><h2 class="text-danger">{{ non_compliant_count }}</h2></div>
+      </div>
+    </div>
+  </div>
+
+  {% if compliance_pct is not None %}
+    <div class="row mb-3">
+      <div class="col col-md-12">
+        <div class="progress" style="height: 24px;">
+          <div class="progress-bar bg-success" role="progressbar" style="width: {{ compliance_pct }}%;">
+            {{ compliance_pct }}% Compliant
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="row mb-3">
+    <div class="col col-md-12">
+      <div class="card">
+        <div class="card-body table-responsive">
+          {% render_table table %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

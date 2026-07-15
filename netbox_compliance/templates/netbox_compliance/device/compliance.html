@@ -1,0 +1,121 @@
+{% extends 'generic/object.html' %}
+{% load helpers %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Overall Compliance</h5>
+        <table class="table table-hover attr-table mb-0">
+          <tr>
+            <th scope="row">Score</th>
+            <td>{{ overall_score }}%</td>
+          </tr>
+          <tr>
+            <th scope="row">Compliant</th>
+            <td>{% checkmark compliant %}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% for entry in packages %}
+    <div class="row mb-3">
+      <div class="col col-md-12">
+        <div class="card">
+          <h5 class="card-header d-flex justify-content-between align-items-center">
+            <a href="{{ entry.package.get_absolute_url }}">{{ entry.package.name }}</a>
+            <span>{{ entry.score }}%</span>
+          </h5>
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Measure</th>
+                <th>Severity</th>
+                <th>Weight</th>
+                <th>Required</th>
+                <th>Status</th>
+                <th>Last Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in entry.rows %}
+                <tr>
+                  <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
+                  <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
+                  <td>{{ row.weight }}</td>
+                  <td>{% checkmark row.required %}</td>
+                  <td><span class="badge text-bg-secondary">{{ row.status }}</span></td>
+                  <td>{% if row.result %}{{ row.result.timestamp }} ({{ row.result.source }}){% else %}{{ ''|placeholder }}{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if direct_rows %}
+    <div class="row mb-3">
+      <div class="col col-md-12">
+        <div class="card">
+          <h5 class="card-header">Direct Measures</h5>
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Measure</th>
+                <th>Severity</th>
+                <th>Weight</th>
+                <th>Status</th>
+                <th>Last Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in direct_rows %}
+                <tr>
+                  <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
+                  <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
+                  <td>{{ row.weight }}</td>
+                  <td><span class="badge text-bg-secondary">{{ row.status }}</span></td>
+                  <td>{% if row.result %}{{ row.result.timestamp }} ({{ row.result.source }}){% else %}{{ ''|placeholder }}{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if exemptions_applied %}
+    <div class="row mb-3">
+      <div class="col col-md-12">
+        <div class="card">
+          <h5 class="card-header">Exemptions Applied</h5>
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Measure</th>
+                <th>Justification</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for exemption in exemptions_applied %}
+                <tr>
+                  <td><a href="{{ exemption.measure.get_absolute_url }}">{{ exemption.measure.name }}</a></td>
+                  <td>{{ exemption.justification }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if not packages and not direct_rows %}
+    <div class="alert alert-info">This device has no effective compliance measures.</div>
+  {% endif %}
+{% endblock content %}

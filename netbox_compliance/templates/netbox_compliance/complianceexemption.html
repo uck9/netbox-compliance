@@ -1,0 +1,53 @@
+{% extends 'generic/object.html' %}
+{% load plugins %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h5 class="card-header">Exemption</h5>
+        <table class="table table-hover attr-table">
+          <tr>
+            <th scope="row">Measure</th>
+            <td><a href="{{ object.measure.get_absolute_url }}">{{ object.measure }}</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Scope</th>
+            <td>
+              {% if object.device %}Device: <a href="{{ object.device.get_absolute_url }}">{{ object.device }}</a>{% endif %}
+              {% if object.site %}Site: <a href="{{ object.site.get_absolute_url }}">{{ object.site }}</a>{% endif %}
+              {% if object.site_group %}Site Group: <a href="{{ object.site_group.get_absolute_url }}">{{ object.site_group }}</a>{% endif %}
+              {% if object.tag %}Tag: {% badge object.tag %}{% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">Active</th>
+            <td>{% checkmark object.is_active %}</td>
+          </tr>
+          <tr>
+            <th scope="row">Valid From</th>
+            <td>{{ object.valid_from|isodate }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Valid Until</th>
+            <td>{{ object.valid_until|isodate|placeholder }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Approved By</th>
+            <td>{{ object.approved_by|placeholder }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Justification</th>
+            <td>{{ object.justification|linebreaksbr }}</td>
+          </tr>
+        </table>
+      </div>
+      {% include 'inc/panels/tags.html' %}
+      {% plugin_left_page object %}
+    </div>
+    <div class="col col-md-6">
+      {% include 'inc/panels/custom_fields.html' %}
+      {% plugin_right_page object %}
+    </div>
+  </div>
+{% endblock content %}

@@ -1,0 +1,40 @@
+{% extends 'generic/object.html' %}
+{% load plugins %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h5 class="card-header">Package Measure</h5>
+        <table class="table table-hover attr-table">
+          <tr>
+            <th scope="row">Package</th>
+            <td><a href="{{ object.package.get_absolute_url }}">{{ object.package }}</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Measure</th>
+            <td><a href="{{ object.measure.get_absolute_url }}">{{ object.measure }}</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Weight</th>
+            <td>{{ object.weight }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Required</th>
+            <td>{% checkmark object.required %}</td>
+          </tr>
+          <tr>
+            <th scope="row">Display Order</th>
+            <td>{{ object.display_order }}</td>
+          </tr>
+        </table>
+      </div>
+      {% include 'inc/panels/tags.html' %}
+      {% plugin_left_page object %}
+    </div>
+    <div class="col col-md-6">
+      {% include 'inc/panels/custom_fields.html' %}
+      {% plugin_right_page object %}
+    </div>
+  </div>
+{% endblock content %}

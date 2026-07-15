@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netbox-compliance"
+version = "0.1.0"
+authors = [
+  { name="Nathan Reeves" },
+]
+description = "Device compliance measure tracking, scoring, and monthly snapshot reporting for NetBox"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+keywords = ["netbox", "netbox-plugin", "compliance"]
+
+[project.urls]
+"Homepage" = "https://github.com/nathanreeves/netbox-compliance/"
+"Bug Tracker" = "https://github.com/nathanreeves/netbox-compliance/issues/"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["netbox_compliance*"]
+
+[tool.ruff]
+exclude = [
+    "netbox_compliance/migrations",
+]
+
+[tool.ruff.lint]
+extend-select = ["E4", "E7", "E9", "F", "W", "C", "I"]
+ignore = ["F403", "F405"]
+
+[tool.ruff.lint.isort]
+known-local-folder = ["netbox_compliance"]
+known-first-party = [
+    "netbox",
+    "core",
+    "dcim",
+    "extras",
+    "tenancy",
+    "users",
+    "utilities",
+]
+
+[tool.ruff.format]
+quote-style = "single"
