@@ -6,7 +6,7 @@ external analysis scripts via the REST API, and producing monthly point-in-time 
 
 External scripts perform all actual checks (config validation, dot1x, STP, local passwords, NTP sync, etc.) and
 push results in via `POST /api/plugins/compliance/results/bulk/`. This plugin stores definitions, assignments,
-results, exemptions, and snapshots, and computes weighted compliance scores.
+results, exemptions, and snapshots, and computes weighted compliance scores..
 
 ## Compatibility
 
