@@ -24,9 +24,9 @@
     <div class="row mb-3">
       <div class="col col-md-12">
         <div class="card">
-          <h5 class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="card-header d-flex justify-content-between align-items-center" id="package-{{ entry.package.slug }}">
             <a href="{{ entry.package.get_absolute_url }}">{{ entry.package.name }}</a>
-            <span>{{ entry.score }}%</span>
+            <span>{% badge '' bg_color=entry.traffic_light show_empty=True %} {{ entry.score }}%</span>
           </h5>
           <table class="table table-hover mb-0">
             <thead>
@@ -36,6 +36,7 @@
                 <th>Weight</th>
                 <th>Required</th>
                 <th>Status</th>
+                <th>Value</th>
                 <th>Last Result</th>
               </tr>
             </thead>
@@ -46,7 +47,8 @@
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
                   <td>{{ row.weight }}</td>
                   <td>{% checkmark row.required %}</td>
-                  <td><span class="badge text-bg-secondary">{{ row.status }}</span></td>
+                  <td>{% badge row.display_label bg_color=row.display_color %}</td>
+                  <td>{{ row.value|placeholder }}</td>
                   <td>{% if row.result %}{{ row.result.timestamp }} ({{ row.result.source }}){% else %}{{ ''|placeholder }}{% endif %}</td>
                 </tr>
               {% endfor %}
@@ -69,6 +71,7 @@
                 <th>Severity</th>
                 <th>Weight</th>
                 <th>Status</th>
+                <th>Value</th>
                 <th>Last Result</th>
               </tr>
             </thead>
@@ -78,7 +81,8 @@
                   <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
                   <td>{{ row.weight }}</td>
-                  <td><span class="badge text-bg-secondary">{{ row.status }}</span></td>
+                  <td>{% badge row.display_label bg_color=row.display_color %}</td>
+                  <td>{{ row.value|placeholder }}</td>
                   <td>{% if row.result %}{{ row.result.timestamp }} ({{ row.result.source }}){% else %}{{ ''|placeholder }}{% endif %}</td>
                 </tr>
               {% endfor %}

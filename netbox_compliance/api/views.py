@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from dcim.models import Device
 from django.db import transaction
@@ -9,7 +10,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..choices import ComplianceResultStatusChoices
+from ..choices import ComplianceMeasureResultTypeChoices, ComplianceResultStatusChoices
 from ..models import (
     ComplianceExemption,
     ComplianceMeasure,
@@ -20,7 +21,7 @@ from ..models import (
     PackageAssignment,
     PackageMeasure,
 )
-from ..services import build_snapshot_data, get_effective_measures, score_device
+from ..services import build_snapshot_data, enum_credit_status, get_effective_measures, score_device
 from . import serializers
 from .. import filtersets
 
@@ -123,6 +124,61 @@ def _parse_timestamp(value):
     return value
 
 
+def _derive_status_and_value(measure, item):
+    """
+    Returns (status, value, error). error is a human-readable string or None.
+
+    Scripts post `value`; status is computed server-side from the measure's
+    result_type. The only status a script may post explicitly is 'error' or
+    'not_applicable' (the check itself broke or doesn't apply) -- value is
+    optional in that case.
+    """
+    explicit_status = item.get('status')
+    if explicit_status is not None:
+        if explicit_status not in (ComplianceResultStatusChoices.ERROR, ComplianceResultStatusChoices.NOT_APPLICABLE):
+            return None, None, (
+                f"status may only be posted explicitly as 'error' or 'not_applicable' "
+                f"(got {explicit_status!r}); all other results must post 'value'."
+            )
+        return explicit_status, item.get('value'), None
+
+    if 'value' not in item:
+        return None, None, "Item must include 'value' (or an explicit status of 'error'/'not_applicable')."
+    raw_value = item['value']
+
+    if measure.result_type == ComplianceMeasureResultTypeChoices.BOOLEAN:
+        if isinstance(raw_value, bool):
+            is_true = raw_value
+        elif isinstance(raw_value, str) and raw_value.lower() in ('true', 'false'):
+            is_true = raw_value.lower() == 'true'
+        else:
+            return None, None, f"Invalid boolean value for measure {measure.slug!r}: {raw_value!r}"
+        status_value = ComplianceResultStatusChoices.PASS if is_true else ComplianceResultStatusChoices.FAIL
+        return status_value, str(is_true).lower(), None
+
+    if measure.result_type == ComplianceMeasureResultTypeChoices.PERCENTAGE:
+        try:
+            pct = Decimal(str(raw_value))
+        except (InvalidOperation, TypeError):
+            return None, None, f"Invalid percentage value for measure {measure.slug!r}: {raw_value!r}"
+        threshold = measure.pass_threshold if measure.pass_threshold is not None else Decimal('100')
+        status_value = ComplianceResultStatusChoices.PASS if pct >= threshold else ComplianceResultStatusChoices.FAIL
+        return status_value, str(pct), None
+
+    # enum
+    entry = measure.value_map.get(raw_value)
+    if entry is None:
+        return None, None, f"Unknown enum value {raw_value!r} for measure {measure.slug!r}"
+    return enum_credit_status(entry), raw_value, None
+
+
+def _check_required_detail_keys(measure, details):
+    missing = [key for key in measure.required_detail_keys if key not in details]
+    if missing:
+        return f"Missing required detail keys for measure {measure.slug!r}: {missing}"
+    return None
+
+
 class BulkResultIngestView(APIView):
     """
     POST /api/plugins/compliance/results/bulk/
@@ -171,12 +227,15 @@ class BulkResultIngestView(APIView):
                     })
                     continue
 
-                item_status = item.get('status')
-                if item_status not in ComplianceResultStatusChoices.values():
-                    errors.append({
-                        'index': batch_index, 'item': item_index,
-                        'error': f"Invalid status: {item_status!r}",
-                    })
+                item_status, item_value, derive_error = _derive_status_and_value(measure, item)
+                if derive_error:
+                    errors.append({'index': batch_index, 'item': item_index, 'error': derive_error})
+                    continue
+
+                details = item.get('details', {})
+                detail_error = _check_required_detail_keys(measure, details)
+                if detail_error:
+                    errors.append({'index': batch_index, 'item': item_index, 'error': detail_error})
                     continue
 
                 if item.get('timestamp'):
@@ -193,7 +252,8 @@ class BulkResultIngestView(APIView):
                 resolved_items.append({
                     'measure': measure,
                     'status': item_status,
-                    'details': item.get('details', {}),
+                    'value': item_value,
+                    'details': details,
                     'timestamp': timestamp,
                 })
 
@@ -221,6 +281,7 @@ class BulkResultIngestView(APIView):
                         'device': device,
                         'measure': item['measure'],
                         'status': item['status'],
+                        'value': item['value'],
                         'details': item['details'],
                         'source': batch['source'],
                     }

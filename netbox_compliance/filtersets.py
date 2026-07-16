@@ -192,6 +192,7 @@ class ComplianceResultFilterSet(NetBoxModelFilterSet):
     )
     status = django_filters.MultipleChoiceFilter(choices=ComplianceResultStatusChoices)
     timestamp = django_filters.DateTimeFromToRangeFilter()
+    latest = django_filters.BooleanFilter(method='filter_latest', label=_('Latest result per device/measure'))
 
     class Meta:
         model = ComplianceResult
@@ -201,6 +202,16 @@ class ComplianceResultFilterSet(NetBoxModelFilterSet):
         if not value.strip():
             return queryset
         return queryset.filter(Q(source__icontains=value))
+
+    def filter_latest(self, queryset, name, value):
+        if not value:
+            return queryset
+        latest_pks = (
+            queryset.order_by('device_id', 'measure_id', '-timestamp')
+            .distinct('device_id', 'measure_id')
+            .values_list('pk', flat=True)
+        )
+        return queryset.filter(pk__in=list(latest_pks))
 
 
 class ComplianceSnapshotFilterSet(NetBoxModelFilterSet):

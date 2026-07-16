@@ -32,17 +32,29 @@ __all__ = (
 class ComplianceMeasureForm(NetBoxModelForm):
     slug = SlugField(slug_source='name')
     comments = CommentField()
+    value_map = JSONField(
+        required=False,
+        help_text=_('Enum type only: {"key": {"label": ..., "color": "green|orange|red|grey", "credit": 0-100}}'),
+    )
+    required_detail_keys = JSONField(required=False, help_text=_('e.g. ["running", "target"]'))
 
     fieldsets = (
         FieldSet('name', 'slug', 'description', 'category', 'severity', 'status', 'tags', name=_('Measure')),
+        FieldSet('result_type', 'pass_threshold', 'value_map', name=_('Result Type')),
         FieldSet('max_result_age_days', name=_('Staleness')),
+        FieldSet(
+            'show_on_device_panel', 'panel_display_order', 'display_template', 'required_detail_keys',
+            name=_('Device Panel'),
+        ),
     )
 
     class Meta:
         model = ComplianceMeasure
         fields = (
             'name', 'slug', 'description', 'category', 'severity',
-            'max_result_age_days', 'status', 'comments', 'tags',
+            'max_result_age_days', 'status', 'comments', 'result_type',
+            'pass_threshold', 'value_map', 'show_on_device_panel', 'panel_display_order',
+            'display_template', 'required_detail_keys', 'tags',
         )
 
 
@@ -51,11 +63,18 @@ class CompliancePackageForm(NetBoxModelForm):
 
     fieldsets = (
         FieldSet('name', 'slug', 'description', 'status', 'tags', name=_('Package')),
+        FieldSet(
+            'show_on_device_panel', 'panel_display_order', 'amber_threshold', 'red_on_critical_fail',
+            name=_('Device Panel'),
+        ),
     )
 
     class Meta:
         model = CompliancePackage
-        fields = ('name', 'slug', 'description', 'status', 'tags')
+        fields = (
+            'name', 'slug', 'description', 'status', 'show_on_device_panel',
+            'panel_display_order', 'amber_threshold', 'red_on_critical_fail', 'tags',
+        )
 
 
 class PackageMeasureForm(NetBoxModelForm):
@@ -138,12 +157,12 @@ class ComplianceResultForm(NetBoxModelForm):
     details = JSONField(required=False)
 
     fieldsets = (
-        FieldSet('device', 'measure', 'status', 'timestamp', 'source', 'details', 'tags', name=_('Result')),
+        FieldSet('device', 'measure', 'status', 'value', 'timestamp', 'source', 'details', 'tags', name=_('Result')),
     )
 
     class Meta:
         model = ComplianceResult
-        fields = ('device', 'measure', 'status', 'timestamp', 'source', 'details', 'tags')
+        fields = ('device', 'measure', 'status', 'value', 'timestamp', 'source', 'details', 'tags')
         widgets = {
             'timestamp': DateTimePicker(),
         }

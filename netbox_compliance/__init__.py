@@ -3,6 +3,11 @@ from netbox.plugins import PluginConfig
 from .version import __version__
 
 
+def _invalidate_device_panel_cache_on_result_change(sender, instance, **kwargs):
+    from .services import invalidate_device_panel_cache
+    invalidate_device_panel_cache(instance.device_id)
+
+
 class NetBoxComplianceConfig(PluginConfig):
     name = 'netbox_compliance'
     verbose_name = 'NetBox Compliance'
@@ -33,11 +38,42 @@ class NetBoxComplianceConfig(PluginConfig):
             'netbox_compliance.views.DeviceComplianceTabView',
         )
 
+    def register_result_cache_invalidation(self) -> None:
+        """
+        Invalidate the device-page compliance panel cache (services.py's
+        get_device_panel_data, keyed compliance:panel:{device_id}) whenever
+        a ComplianceResult is written or deleted -- covers both bulk
+        ingestion and manual admin edits in one place. Scoped only to
+        ComplianceResult (not PackageAssignment/MeasureAssignment/
+        ComplianceExemption/PackageMeasure): those changes rely on the
+        panel's 300s TTL instead, since resolving "which devices does this
+        scope change affect" is the expensive query the cache exists to
+        avoid doing eagerly.
+
+        The receiver must be a module-level function, not a local closure:
+        Signal.connect() defaults to a weak reference, and a closure with no
+        other strong reference gets garbage-collected almost immediately
+        after ready() returns, silently unregistering the handler.
+        """
+        from django.db.models.signals import post_delete, post_save
+
+        from .models import ComplianceResult
+
+        post_save.connect(
+            _invalidate_device_panel_cache_on_result_change, sender=ComplianceResult,
+            dispatch_uid='compliance_result_panel_cache_invalidate_save',
+        )
+        post_delete.connect(
+            _invalidate_device_panel_cache_on_result_change, sender=ComplianceResult,
+            dispatch_uid='compliance_result_panel_cache_invalidate_delete',
+        )
+
     def ready(self):
         super().ready()
         from . import dashboard, jobs  # noqa: F401
 
         self.register_device_compliance_tab()
+        self.register_result_cache_invalidation()
 
 
 config = NetBoxComplianceConfig

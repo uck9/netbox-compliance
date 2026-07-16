@@ -16,6 +16,8 @@ class ComplianceMeasureTable(NetBoxTable):
     category = ChoiceFieldColumn()
     severity = ChoiceFieldColumn()
     status = ChoiceFieldColumn()
+    result_type = ChoiceFieldColumn()
+    show_on_device_panel = columns.BooleanColumn()
     package_count = tables.Column(
         accessor='package_count',
         verbose_name='Packages',
@@ -25,16 +27,18 @@ class ComplianceMeasureTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = ComplianceMeasure
         fields = (
-            'pk', 'id', 'name', 'slug', 'category', 'severity', 'status',
-            'max_result_age_days', 'package_count', 'description', 'comments',
+            'pk', 'id', 'name', 'slug', 'category', 'severity', 'status', 'result_type',
+            'max_result_age_days', 'show_on_device_panel', 'panel_display_order',
+            'package_count', 'description', 'comments',
             'tags', 'created', 'last_updated', 'actions',
         )
-        default_columns = ('pk', 'name', 'category', 'severity', 'status', 'max_result_age_days', 'package_count')
+        default_columns = ('pk', 'name', 'category', 'severity', 'status', 'result_type', 'max_result_age_days', 'package_count')
 
 
 class CompliancePackageTable(NetBoxTable):
     name = tables.Column(linkify=True)
     status = ChoiceFieldColumn()
+    show_on_device_panel = columns.BooleanColumn()
     measure_count = tables.Column(
         accessor='measure_count',
         verbose_name='Measures',
@@ -45,6 +49,7 @@ class CompliancePackageTable(NetBoxTable):
         model = CompliancePackage
         fields = (
             'pk', 'id', 'name', 'slug', 'status', 'measure_count', 'description',
+            'show_on_device_panel', 'panel_display_order', 'amber_threshold', 'red_on_critical_fail',
             'tags', 'created', 'last_updated', 'actions',
         )
         default_columns = ('pk', 'name', 'status', 'measure_count', 'description')

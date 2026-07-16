@@ -35,6 +35,20 @@ class ComplianceMeasureSeverityChoices(ChoiceSet):
     ]
 
 
+class ComplianceMeasureResultTypeChoices(ChoiceSet):
+    key = 'ComplianceMeasure.result_type'
+
+    BOOLEAN = 'boolean'
+    PERCENTAGE = 'percentage'
+    ENUM = 'enum'
+
+    CHOICES = [
+        (BOOLEAN, 'Boolean', 'blue'),
+        (PERCENTAGE, 'Percentage', 'cyan'),
+        (ENUM, 'Enum', 'purple'),
+    ]
+
+
 class ComplianceMeasureStatusChoices(ChoiceSet):
     key = 'ComplianceMeasure.status'
 
@@ -101,3 +115,14 @@ class EffectiveStatusChoices(ChoiceSet):
         (NOT_APPLICABLE, 'Not Applicable', 'gray'),
         (EXEMPT, 'Exempt', 'blue'),
     ]
+
+
+# Machine-checkable vocabulary for ComplianceMeasure.value_map entries (enum result_type).
+# Not a ChoiceSet: these are values inside a JSONField, not a model field, so there's no
+# get_FOO_display/form-widget to gain from ChoiceSet machinery.
+VALUE_MAP_COLORS = {'green', 'orange', 'red', 'grey'}
+
+# Traffic-light values for CompliancePackage resolution (services.package_traffic_light).
+# Also plain strings, not a ChoiceSet, for the same reason -- display-only, derived, never
+# stored on a model field.
+TRAFFIC_LIGHT_COLORS = {'grey', 'green', 'amber', 'red'}

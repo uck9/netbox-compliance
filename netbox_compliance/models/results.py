@@ -33,6 +33,13 @@ class ComplianceResult(NetBoxModel):
         choices=ComplianceResultStatusChoices,
         verbose_name=_('status'),
     )
+    value = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        verbose_name=_('value'),
+        help_text=_('Observed value as posted by the script: "true"/"false", a percentage, or an enum key'),
+    )
     timestamp = models.DateTimeField(
         default=timezone.now,
         verbose_name=_('timestamp'),

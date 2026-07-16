@@ -2,6 +2,8 @@ from rest_framework import serializers
 
 from netbox.api.serializers import NetBoxModelSerializer
 
+from ...choices import ComplianceMeasureResultTypeChoices
+from ...models.measures import _validate_value_map
 from ...models import ComplianceMeasure, CompliancePackage, PackageMeasure
 
 __all__ = (
@@ -16,10 +18,38 @@ class ComplianceMeasureSerializer(NetBoxModelSerializer):
         model = ComplianceMeasure
         fields = (
             'id', 'url', 'display', 'name', 'slug', 'description', 'category',
-            'severity', 'max_result_age_days', 'status', 'comments', 'tags',
+            'severity', 'max_result_age_days', 'status', 'comments', 'result_type',
+            'pass_threshold', 'value_map', 'show_on_device_panel', 'panel_display_order',
+            'display_template', 'required_detail_keys', 'tags',
             'custom_fields', 'created', 'last_updated',
         )
         brief_fields = ('id', 'url', 'display', 'name', 'slug')
+
+    def validate(self, data):
+        data = super().validate(data)
+        result_type = data.get('result_type', getattr(self.instance, 'result_type', ComplianceMeasureResultTypeChoices.BOOLEAN))
+        value_map = data.get('value_map', getattr(self.instance, 'value_map', {}))
+        pass_threshold = data.get('pass_threshold', getattr(self.instance, 'pass_threshold', None))
+
+        if result_type == ComplianceMeasureResultTypeChoices.ENUM:
+            if not value_map:
+                raise serializers.ValidationError({'value_map': 'Enum measures require a non-empty value_map.'})
+            errors = _validate_value_map(value_map)
+            if errors:
+                raise serializers.ValidationError({'value_map': errors})
+            if pass_threshold is not None:
+                raise serializers.ValidationError({'pass_threshold': 'Enum measures must not set pass_threshold.'})
+        elif result_type == ComplianceMeasureResultTypeChoices.PERCENTAGE:
+            if pass_threshold is None:
+                raise serializers.ValidationError({'pass_threshold': 'Percentage measures require pass_threshold.'})
+            if value_map:
+                raise serializers.ValidationError({'value_map': 'Percentage measures must not set value_map.'})
+        else:  # boolean
+            if pass_threshold is not None:
+                raise serializers.ValidationError({'pass_threshold': 'Boolean measures must not set pass_threshold.'})
+            if value_map:
+                raise serializers.ValidationError({'value_map': 'Boolean measures must not set value_map.'})
+        return data
 
 
 class CompliancePackageSerializer(NetBoxModelSerializer):
@@ -29,7 +59,8 @@ class CompliancePackageSerializer(NetBoxModelSerializer):
         model = CompliancePackage
         fields = (
             'id', 'url', 'display', 'name', 'slug', 'description', 'status',
-            'measures', 'tags', 'custom_fields', 'created', 'last_updated',
+            'measures', 'show_on_device_panel', 'panel_display_order', 'amber_threshold',
+            'red_on_critical_fail', 'tags', 'custom_fields', 'created', 'last_updated',
         )
         brief_fields = ('id', 'url', 'display', 'name', 'slug')
 

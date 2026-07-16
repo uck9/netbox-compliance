@@ -42,6 +42,7 @@ class DeviceComplianceTabView(generic.ObjectView):
             packages.append({
                 'package': package,
                 'score': scoring['package_scores'][package],
+                'traffic_light': services.package_traffic_light(instance, package, rows=rows),
                 'rows': rows,
             })
 

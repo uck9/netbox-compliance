@@ -9,12 +9,17 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.db.models import Q
+from django.template import Context, Template
 from django.utils import timezone
 
 from .choices import (
+    ComplianceMeasureResultTypeChoices,
+    ComplianceMeasureSeverityChoices,
     ComplianceMeasureStatusChoices,
     CompliancePackageStatusChoices,
+    ComplianceResultStatusChoices,
     EffectiveStatusChoices,
 )
 from .models import (
@@ -28,6 +33,11 @@ from .models import (
 
 ZERO_SCORE_GUARD = Decimal('100.00')
 
+PANEL_CACHE_TTL = 300
+PANEL_CACHE_KEY = 'compliance:panel:{device_id}'
+
+_EFFECTIVE_STATUS_LABELS = {value: label for value, label, *_rest in EffectiveStatusChoices.CHOICES}
+
 
 @dataclass
 class EffectiveMeasure:
@@ -39,6 +49,10 @@ class EffectiveMeasure:
     status: str = EffectiveStatusChoices.PENDING
     result: ComplianceResult = None
     stale: bool = False
+    value: str = None
+    display_label: str = ''
+    display_color: str = 'grey'
+    credit: int = 0
 
 
 def _matching_package_assignments(device):
@@ -114,11 +128,79 @@ def _apply_status(row, result, now):
         row.status = EffectiveStatusChoices.PENDING
         row.result = None
         row.stale = False
+        row.value = None
+        _apply_display(row)
         return
     max_age = timedelta(days=row.measure.max_result_age_days)
     row.result = result
     row.stale = (now - result.timestamp) > max_age
+    row.value = result.value
     row.status = EffectiveStatusChoices.STALE if row.stale else result.status
+    _apply_display(row)
+
+
+def enum_credit_status(entry):
+    """
+    pass/fail derivation shared by bulk ingestion and the custom-field import
+    command: an enum value_map entry counts as a pass only at full credit.
+    """
+    return (
+        ComplianceResultStatusChoices.PASS if int(entry.get('credit', 0)) == 100
+        else ComplianceResultStatusChoices.FAIL
+    )
+
+
+def _apply_display(row):
+    """
+    Resolve display_label/display_color/credit from row.measure.result_type,
+    row.value, and row.status. Pure function of already-set row fields -- no
+    DB access. Boolean-type rows derive credit from `status` alone (not
+    `value`), so direct-model-creation fixtures that never set `value` (as
+    the pre-existing test suite does) keep scoring correctly.
+    """
+    measure = row.measure
+
+    if row.status in (EffectiveStatusChoices.PENDING, EffectiveStatusChoices.STALE):
+        row.display_label = _EFFECTIVE_STATUS_LABELS.get(row.status, row.status)
+        row.display_color = EffectiveStatusChoices.colors.get(row.status, 'grey')
+        row.credit = 0
+        return
+    if row.status == EffectiveStatusChoices.ERROR:
+        row.display_label = _EFFECTIVE_STATUS_LABELS.get(row.status, 'Error')
+        row.display_color = EffectiveStatusChoices.colors.get(row.status, 'dark-red')
+        row.credit = 0
+        return
+    if row.status == EffectiveStatusChoices.NOT_APPLICABLE:
+        row.display_label = _EFFECTIVE_STATUS_LABELS.get(row.status, 'Not Applicable')
+        row.display_color = 'grey'
+        row.credit = 0
+        return
+
+    if measure.result_type == ComplianceMeasureResultTypeChoices.PERCENTAGE:
+        try:
+            pct = Decimal(row.value) if row.value is not None else Decimal(0)
+        except Exception:
+            pct = Decimal(0)
+        pct = max(Decimal(0), min(Decimal(100), pct))
+        row.credit = int(pct)
+        row.display_label = f'{pct}%'
+        threshold = measure.pass_threshold if measure.pass_threshold is not None else Decimal(100)
+        if pct >= threshold:
+            row.display_color = 'green'
+        elif pct >= (threshold - 20):
+            row.display_color = 'orange'
+        else:
+            row.display_color = 'red'
+    elif measure.result_type == ComplianceMeasureResultTypeChoices.ENUM:
+        entry = measure.value_map.get(row.value, {})
+        row.display_label = entry.get('label', row.value or '')
+        row.display_color = entry.get('color', 'grey')
+        row.credit = int(entry.get('credit', 0))
+    else:  # boolean
+        is_pass = row.status == EffectiveStatusChoices.PASS
+        row.display_label = 'Pass' if is_pass else 'Fail'
+        row.display_color = 'green' if is_pass else 'red'
+        row.credit = 100 if is_pass else 0
 
 
 def get_effective_measures(device):
@@ -209,8 +291,12 @@ def get_effective_measures(device):
 
 def score_group(rows):
     """
-    score = 100 * sum(weight for required, non-N/A rows that pass)
-                / sum(weight for required, non-N/A rows)
+    score = 100 * sum(weight * credit for required, non-N/A rows)
+                / sum(weight * 100 for required, non-N/A rows)
+
+    Every row resolves to a credit of 0-100 (see _apply_display); this is
+    numerically identical to the old binary pass-count formula whenever
+    every row's credit is 0 or 100 (i.e. boolean-only packages).
 
     Returns (score, total_weight). An empty/zero-weight scoreable set
     (all N/A, or informational-only) is vacuously 100% compliant and
@@ -220,8 +306,9 @@ def score_group(rows):
     total_weight = sum(r.weight for r in scored)
     if total_weight == 0:
         return ZERO_SCORE_GUARD, 0
-    passed_weight = sum(r.weight for r in scored if r.status == EffectiveStatusChoices.PASS)
-    score = (Decimal(100) * passed_weight / total_weight).quantize(Decimal('0.01'))
+    numerator = sum(Decimal(r.weight) * Decimal(r.credit) for r in scored)
+    denominator = Decimal(total_weight) * Decimal(100)
+    score = (Decimal(100) * numerator / denominator).quantize(Decimal('0.01'))
     return score, total_weight
 
 
@@ -230,8 +317,10 @@ def score_device(device, effective=None):
     Overall device score = weighted mean of package scores (each weighted
     by its total required-measure weight) combined with the direct-measures
     set treated as one pseudo-package. Compliant iff overall_score == 100,
-    which is equivalent to "every effective required measure is pass or
-    not_applicable" given not_applicable is excluded from scoring.
+    which (a weighted average of per-row credits, each <=100, only reaches
+    100 if every included row's credit is 100) is equivalent to "every
+    effective required measure is pass, with full credit, or not_applicable"
+    given not_applicable is excluded from scoring.
     """
     effective = effective if effective is not None else get_effective_measures(device)
 
@@ -262,6 +351,58 @@ def score_device(device, effective=None):
     }
 
 
+def package_traffic_light(device, package, rows=None):
+    """
+    Single traffic-light resolution used by the device panel, tab section
+    header, and reports (spec B2). Returns one of 'grey'/'green'/'red'/'amber'.
+
+    `rows` may be passed pre-resolved (list[EffectiveMeasure]) to avoid
+    re-querying when the caller already has get_effective_measures() output;
+    otherwise resolved via get_effective_measures(device).
+    """
+    if rows is None:
+        rows = get_effective_measures(device)['packages'].get(package, [])
+
+    required_rows = [r for r in rows if r.required]
+    if not required_rows:
+        return 'grey'
+    if all(r.status in (EffectiveStatusChoices.PENDING, EffectiveStatusChoices.STALE) for r in required_rows):
+        return 'grey'
+    if all(r.status in (EffectiveStatusChoices.PASS, EffectiveStatusChoices.NOT_APPLICABLE) for r in required_rows):
+        return 'green'
+
+    critical_fail = any(
+        r.status == EffectiveStatusChoices.FAIL
+        and r.measure.severity in (ComplianceMeasureSeverityChoices.CRITICAL, ComplianceMeasureSeverityChoices.HIGH)
+        for r in required_rows
+    )
+    if package.red_on_critical_fail and critical_fail:
+        return 'red'
+
+    score, _ = score_group(rows)
+    return 'red' if score < package.amber_threshold else 'amber'
+
+
+def render_display_template(row):
+    """
+    Render measure.display_template against {value, label, details}, falling
+    back to display_label when the template is blank or fails to render.
+    Used by the panel, the compliance tab, and the device-status API's
+    display_text field.
+    """
+    if not row.measure.display_template:
+        return row.display_label
+    context = Context({
+        'value': row.value,
+        'label': row.display_label,
+        'details': row.result.details if row.result else {},
+    })
+    try:
+        return Template(row.measure.display_template).render(context)
+    except Exception:
+        return row.display_label
+
+
 def _measure_row_dict(row):
     return {
         'measure': row.measure.slug,
@@ -274,6 +415,12 @@ def _measure_row_dict(row):
         'result_timestamp': row.result.timestamp.isoformat() if row.result else None,
         'source': row.result.source if row.result else None,
         'stale': row.stale,
+        'result_type': row.measure.result_type,
+        'value': row.value,
+        'display_label': row.display_label,
+        'display_color': row.display_color,
+        'credit': row.credit,
+        'display_text': render_display_template(row),
     }
 
 
@@ -293,6 +440,7 @@ def build_snapshot_data(device):
             'package': package.slug,
             'package_name': package.name,
             'score': float(scoring['package_scores'][package]),
+            'traffic_light': package_traffic_light(device, package, rows=rows),
             'measures': [_measure_row_dict(row) for row in rows],
         })
 
@@ -385,3 +533,58 @@ def generate_snapshots_for_period(period):
         )
         count += 1
     return count
+
+
+def get_device_panel_data(device):
+    """
+    Cached assembly of the device-page compliance panel payload (spec B3/B4):
+    pinned package rows (show_on_device_panel=True packages, ordered by
+    their own panel_display_order) and pinned measure rows
+    (show_on_device_panel=True measures across packages+direct, ordered by
+    their own panel_display_order) -- the two sections sort independently of
+    each other. A pinned measure is shown even if its source package is also
+    pinned (deliberate duplication: the package row is the rollup, the
+    measure row is the always-visible live value).
+    """
+    key = PANEL_CACHE_KEY.format(device_id=device.pk)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    effective = get_effective_measures(device)
+    scoring = score_device(device, effective=effective)
+
+    package_rows = []
+    for package, rows in effective['packages'].items():
+        if not package.show_on_device_panel:
+            continue
+        package_rows.append({
+            'package': package,
+            'score': scoring['package_scores'][package],
+            'traffic_light': package_traffic_light(device, package, rows=rows),
+            'oldest_result_age': min((r.result.timestamp for r in rows if r.result), default=None),
+        })
+    package_rows.sort(key=lambda p: (p['package'].panel_display_order, p['package'].name))
+
+    all_rows = [r for rows in effective['packages'].values() for r in rows] + effective['direct']
+    measure_rows = [
+        {
+            'row': row,
+            'display_text': render_display_template(row),
+            # Panel-specific override (spec B3): stale/pending rows show a
+            # grey badge here even though the shared display_color (used by
+            # the tab/API/snapshots) distinguishes stale (orange) from
+            # pending (grey) -- the last-known display_text is still shown.
+            'display_color': 'grey' if (row.stale or row.status == EffectiveStatusChoices.PENDING) else row.display_color,
+        }
+        for row in all_rows if row.measure.show_on_device_panel
+    ]
+    measure_rows.sort(key=lambda m: (m['row'].measure.panel_display_order, m['row'].measure.name))
+
+    payload = {'packages': package_rows, 'measures': measure_rows}
+    cache.set(key, payload, PANEL_CACHE_TTL)
+    return payload
+
+
+def invalidate_device_panel_cache(device_id):
+    cache.delete(PANEL_CACHE_KEY.format(device_id=device_id))

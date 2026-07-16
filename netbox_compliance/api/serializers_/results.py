@@ -14,7 +14,7 @@ class ComplianceResultSerializer(NetBoxModelSerializer):
     class Meta:
         model = ComplianceResult
         fields = (
-            'id', 'url', 'display', 'device', 'measure', 'status', 'timestamp',
+            'id', 'url', 'display', 'device', 'measure', 'status', 'value', 'timestamp',
             'source', 'details', 'tags', 'custom_fields', 'created', 'last_updated',
         )
         brief_fields = ('id', 'url', 'display', 'device', 'measure', 'status')
