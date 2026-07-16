@@ -1,0 +1,25 @@
+{% load helpers %}
+<div class="card">
+  <h5 class="card-header">Compliance</h5>
+  <table class="table table-hover mb-0">
+    <tbody>
+      {% for entry in panel.packages %}
+        <tr>
+          <td class="w-1">{% badge '' bg_color=entry.traffic_light show_empty=True %}</td>
+          <td><a href="{{ tab_url }}#package-{{ entry.package.slug }}">{{ entry.package.name }}</a></td>
+          <td>{{ entry.score }}%</td>
+          <td class="text-end text-muted">
+            {% if entry.oldest_result_age %}{{ entry.oldest_result_age|timesince }} ago{% else %}{{ ''|placeholder }}{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      {% for entry in panel.measures %}
+        <tr>
+          <td class="w-1">{% badge entry.row.display_label bg_color=entry.display_color %}</td>
+          <td>{{ entry.row.measure.name }}</td>
+          <td colspan="2">{{ entry.display_text }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
