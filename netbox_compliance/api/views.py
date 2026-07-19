@@ -302,7 +302,7 @@ class DeviceComplianceStatusView(APIView):
         data, overall_score, compliant = build_snapshot_data(device)
         return Response({
             'device': device.pk,
-            'device_name': device.name,
+            'device_name': str(device),
             'overall_score': overall_score,
             'compliant': compliant,
             **data,

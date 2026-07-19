@@ -38,6 +38,31 @@ class NetBoxComplianceConfig(PluginConfig):
             'netbox_compliance.views.DeviceComplianceTabView',
         )
 
+    def register_software_version_evaluation(self) -> None:
+        """
+        Recompute the `software-version` ComplianceResult whenever a Device's
+        software_version custom field changes -- covers manual UI/bulk edits,
+        CSV import, and REST/pynetbox writes uniformly, since all of them
+        ultimately call Device.save(). pre_save snapshots the prior value so
+        post_save can skip devices where an unrelated field changed.
+
+        Same weak-reference caveat as register_result_cache_invalidation:
+        receivers must be module-level functions, defined in signals.py.
+        """
+        from django.db.models.signals import post_save, pre_save
+        from dcim.models import Device
+
+        from .signals import evaluate_software_version_on_change, snapshot_prior_software_version
+
+        pre_save.connect(
+            snapshot_prior_software_version, sender=Device,
+            dispatch_uid='compliance_snapshot_prior_software_version',
+        )
+        post_save.connect(
+            evaluate_software_version_on_change, sender=Device,
+            dispatch_uid='compliance_evaluate_software_version_on_change',
+        )
+
     def register_result_cache_invalidation(self) -> None:
         """
         Invalidate the device-page compliance panel cache (services.py's
@@ -73,6 +98,7 @@ class NetBoxComplianceConfig(PluginConfig):
         from . import dashboard, jobs  # noqa: F401
 
         self.register_device_compliance_tab()
+        self.register_software_version_evaluation()
         self.register_result_cache_invalidation()
 
 

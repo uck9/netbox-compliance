@@ -1,5 +1,6 @@
 from datetime import date
 
+from dcim.models import Device
 from django.test import TestCase
 from django.utils import timezone
 
@@ -57,3 +58,24 @@ class SnapshotIdempotencyTest(ComplianceTestMixin, TestCase):
         count = generate_snapshots_for_period(period)
 
         self.assertEqual(count, 0)
+
+    def test_unnamed_device_gets_a_denormalized_display_name(self):
+        # Device.name is nullable (e.g. unnamed VC members) -- device_name
+        # on the snapshot must fall back to Device.__str__() rather than
+        # writing NULL into a NOT NULL column.
+        device = Device.objects.create(
+            name=None, device_type=self.device_type, role=self.device_role, site=self.site,
+        )
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+        ComplianceResult.objects.create(
+            device=device, measure=self.measure, status=ComplianceResultStatusChoices.PASS,
+            timestamp=timezone.now(), source='test',
+        )
+        period = date(2026, 6, 1)
+
+        count = generate_snapshots_for_period(period)
+
+        self.assertEqual(count, 1)
+        snapshot = ComplianceSnapshot.objects.get(period=period)
+        self.assertEqual(snapshot.device_name, str(device))
+        self.assertTrue(snapshot.device_name)

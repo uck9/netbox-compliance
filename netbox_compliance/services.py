@@ -36,6 +36,25 @@ ZERO_SCORE_GUARD = Decimal('100.00')
 PANEL_CACHE_TTL = 300
 PANEL_CACHE_KEY = 'compliance:panel:{device_id}'
 
+SOFTWARE_VERSION_MEASURE_SLUG = 'software-version'
+SOFTWARE_VERSION_SOURCE = 'software_version_signal'
+SOFTWARE_VERSION_CF = 'software_version'
+SOFTWARE_VERSION_MANAGEMENT_CF = 'software_version_management'
+
+# The live `software-version` ComplianceMeasure's value_map keys -- these are
+# the legacy nb_sw_currency_calculation script's own vocabulary (carried over
+# when results were first ingested), NOT the aspirational key names in
+# compliance-plugin-naming-conventions.md's "Standard: software-version"
+# table (on_target/accepted/upgrade_required/unsupported/unknown_version),
+# which were never actually implemented against this measure. With 1000+
+# real ComplianceResult rows already using these keys, renaming them is a
+# breaking change per the naming doc's own immutability rule -- so this
+# module targets what's actually live, not what the doc describes.
+SOFTWARE_VERSION_KEY_ON_TARGET = 'target_active_version'
+SOFTWARE_VERSION_KEY_ACCEPTED = 'accepted_active_version'
+SOFTWARE_VERSION_KEY_UPGRADE_REQUIRED = 'required_upgrade'
+SOFTWARE_VERSION_KEY_RETIRED = 'required_upgrade_retired'
+
 _EFFECTIVE_STATUS_LABELS = {value: label for value, label, *_rest in EffectiveStatusChoices.CHOICES}
 
 
@@ -148,6 +167,141 @@ def enum_credit_status(entry):
     return (
         ComplianceResultStatusChoices.PASS if int(entry.get('credit', 0)) == 100
         else ComplianceResultStatusChoices.FAIL
+    )
+
+
+def _software_version_policy_for_device(platform_data, device):
+    """
+    Resolve the effective version_policy dict for a device from its
+    platform's `software_version_management` JSON (schema_version "1.0"):
+    a child-platform-scoped object with a `defaults.version_policy`
+    baseline, optionally overridden -- in full, not merged field-by-field --
+    by a `device_type_overrides[device_type.model]` entry (most specific,
+    since it pins an exact hardware model) or else a `roles[device_role.slug]`
+    entry, in that precedence order.
+
+    Parent-level platforms (`policy_scope: "parent_platform"`, e.g. plain
+    "IOS XE") carry no version_policy at all -- only `eol`/`parser`/
+    `vulnerabilities`, which feed separate EOL/vulnerability measures, not
+    software-version. Devices are expected to be assigned a child platform.
+    """
+    if not isinstance(platform_data, dict):
+        return None
+
+    device_type_overrides = platform_data.get('device_type_overrides') or {}
+    dt_override = device_type_overrides.get(device.device_type.model) if device.device_type_id else None
+    if isinstance(dt_override, dict) and isinstance(dt_override.get('version_policy'), dict):
+        return dt_override['version_policy']
+
+    roles = platform_data.get('roles') or {}
+    role_override = roles.get(device.role.slug) if device.role_id else None
+    if isinstance(role_override, dict) and isinstance(role_override.get('version_policy'), dict):
+        return role_override['version_policy']
+
+    defaults = platform_data.get('defaults') or {}
+    version_policy = defaults.get('version_policy')
+    return version_policy if isinstance(version_policy, dict) else None
+
+
+def _is_valid_version_policy(version_policy):
+    if not isinstance(version_policy, dict):
+        return False
+    if not isinstance(version_policy.get('accepted_active_versions'), list):
+        return False
+    if not isinstance(version_policy.get('retired_versions'), dict):
+        return False
+    target = version_policy.get('target_active_versions')
+    return isinstance(target, list) and len(target) > 0
+
+
+def compute_software_version_result(device, measure):
+    """
+    Pure computation (no DB write) of the `software-version` result for a
+    device: resolves `device.platform`'s `software_version_management` JSON
+    (device_type is never consulted -- see `_software_version_policy_for_device`)
+    and classifies `device.custom_field_data['software_version']` against it.
+
+    Returns (status, value, details). `value` is None whenever the outcome
+    isn't one of the measure's own value_map keys (not_applicable / error
+    cases) -- see `evaluate_software_version`'s docstring for what each
+    outcome means. Split out from `evaluate_software_version` so validation/
+    audit tooling (e.g. `validate_software_version_results`) can recompute
+    the expected result for a device without creating a new ComplianceResult
+    every time it checks.
+    """
+    running_version = device.custom_field_data.get(SOFTWARE_VERSION_CF) or None
+
+    if device.platform_id is None:
+        return (
+            ComplianceResultStatusChoices.NOT_APPLICABLE, None,
+            {'running': running_version, 'target': None, 'note': 'Device has no platform assigned'},
+        )
+
+    platform_data = device.platform.custom_field_data.get(SOFTWARE_VERSION_MANAGEMENT_CF)
+    version_policy = _software_version_policy_for_device(platform_data, device)
+    if not _is_valid_version_policy(version_policy):
+        return (
+            ComplianceResultStatusChoices.ERROR, None,
+            {
+                'running': running_version, 'target': None,
+                'note': f'No valid version_policy resolved from platform {device.platform.name!r}',
+            },
+        )
+
+    target_versions = version_policy['target_active_versions']
+    target = target_versions[0] if len(target_versions) == 1 else ', '.join(target_versions)
+
+    if not running_version:
+        return (
+            ComplianceResultStatusChoices.ERROR, None,
+            {'running': None, 'target': target, 'note': 'Device has no software_version reported'},
+        )
+
+    if running_version in version_policy['retired_versions']:
+        value = SOFTWARE_VERSION_KEY_RETIRED
+    elif running_version in version_policy['accepted_active_versions']:
+        value = SOFTWARE_VERSION_KEY_ACCEPTED
+    elif running_version in target_versions:
+        value = SOFTWARE_VERSION_KEY_ON_TARGET
+    else:
+        value = SOFTWARE_VERSION_KEY_UPGRADE_REQUIRED
+
+    entry = measure.value_map.get(value)
+    if entry is None:
+        return (
+            ComplianceResultStatusChoices.ERROR, None,
+            {'running': running_version, 'target': target, 'note': f'Measure value_map missing key {value!r}'},
+        )
+
+    return enum_credit_status(entry), value, {'running': running_version, 'target': target}
+
+
+def evaluate_software_version(device):
+    """
+    Resolve and write the `software-version` ComplianceResult for a device
+    (see `compute_software_version_result` for the resolution itself).
+
+    Called from the Device post_save signal whenever the software_version
+    custom field actually changes (see signals.py). Idempotent and cheap to
+    call redundantly -- a pure resolve-and-write with no other side effects.
+
+    Returns None (writes nothing) only when there's no `software-version`
+    measure configured at all. Every other outcome -- no platform assigned,
+    missing/invalid platform version data, or no running version reported --
+    is itself a meaningful compliance signal and is written as a result
+    (status not_applicable / error / error respectively -- there's no enum
+    value for "no version reported" since the live measure's value_map has
+    no key for it; see the module-level SOFTWARE_VERSION_KEY_* comment),
+    rather than silently doing nothing.
+    """
+    measure = ComplianceMeasure.objects.filter(slug=SOFTWARE_VERSION_MEASURE_SLUG).first()
+    if measure is None:
+        return None
+
+    status, value, details = compute_software_version_result(device, measure)
+    return ComplianceResult.objects.create(
+        device=device, measure=measure, status=status, value=value, details=details,
+        source=SOFTWARE_VERSION_SOURCE,
     )
 
 
@@ -527,7 +681,7 @@ def generate_snapshots_for_period(period):
             continue
         ComplianceSnapshot.objects.create(
             device=device,
-            device_name=device.name,
+            device_name=str(device),
             period=period,
             overall_score=overall_score,
             compliant=compliant,
