@@ -72,6 +72,18 @@ class EffectiveMeasureResolutionTest(ComplianceTestMixin, TestCase):
 
         self.assertEqual(effective['packages'], {})
 
+    def test_package_measure_via_parent_platform_scope(self):
+        from dcim.models import Platform
+
+        child_platform = Platform.objects.create(name='ChildPlatform', slug='child-platform', parent=self.platform)
+        device = self.make_device(platform=child_platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+
+        effective = get_effective_measures(device)
+
+        self.assertIn(self.package, effective['packages'])
+        self.assertEqual([row.measure for row in effective['packages'][self.package]], [self.measure1])
+
     def test_retired_package_not_effective(self):
         device = self.make_device(site=self.site)
         self.package.status = CompliancePackageStatusChoices.RETIRED

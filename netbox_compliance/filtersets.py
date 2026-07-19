@@ -56,7 +56,11 @@ class ComplianceMeasureFilterSet(NetBoxModelFilterSet):
 class CompliancePackageFilterSet(NetBoxModelFilterSet):
     status = django_filters.MultipleChoiceFilter(choices=CompliancePackageStatusChoices)
     measure_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='measures', queryset=ComplianceMeasure.objects.all(), label=_('Measure'),
+        field_name='measures', queryset=ComplianceMeasure.objects.all(), label=_('Measure (ID)'),
+    )
+    measure = django_filters.ModelMultipleChoiceFilter(
+        field_name='measures__slug', queryset=ComplianceMeasure.objects.all(),
+        to_field_name='slug', label=_('Measure (slug)'),
     )
 
     class Meta:
@@ -73,10 +77,18 @@ class CompliancePackageFilterSet(NetBoxModelFilterSet):
 
 class PackageMeasureFilterSet(NetBoxModelFilterSet):
     package_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='package', queryset=CompliancePackage.objects.all(), label=_('Package'),
+        field_name='package', queryset=CompliancePackage.objects.all(), label=_('Package (ID)'),
+    )
+    package = django_filters.ModelMultipleChoiceFilter(
+        field_name='package__slug', queryset=CompliancePackage.objects.all(),
+        to_field_name='slug', label=_('Package (slug)'),
     )
     measure_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure'),
+        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure (ID)'),
+    )
+    measure = django_filters.ModelMultipleChoiceFilter(
+        field_name='measure__slug', queryset=ComplianceMeasure.objects.all(),
+        to_field_name='slug', label=_('Measure (slug)'),
     )
     required = django_filters.BooleanFilter()
 
@@ -94,25 +106,53 @@ class PackageMeasureFilterSet(NetBoxModelFilterSet):
 
 class PackageAssignmentFilterSet(NetBoxModelFilterSet):
     package_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='package', queryset=CompliancePackage.objects.all(), label=_('Package'),
+        field_name='package', queryset=CompliancePackage.objects.all(), label=_('Package (ID)'),
+    )
+    package = django_filters.ModelMultipleChoiceFilter(
+        field_name='package__slug', queryset=CompliancePackage.objects.all(),
+        to_field_name='slug', label=_('Package (slug)'),
     )
     device_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='device', queryset=Device.objects.all(), label=_('Device'),
+        field_name='device', queryset=Device.objects.all(), label=_('Device (ID)'),
+    )
+    device = django_filters.ModelMultipleChoiceFilter(
+        field_name='device__name', queryset=Device.objects.all(),
+        to_field_name='name', label=_('Device (name)'),
     )
     device_role_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='device_role', queryset=DeviceRole.objects.all(), label=_('Device Role'),
+        field_name='device_role', queryset=DeviceRole.objects.all(), label=_('Device Role (ID)'),
+    )
+    device_role = django_filters.ModelMultipleChoiceFilter(
+        field_name='device_role__slug', queryset=DeviceRole.objects.all(),
+        to_field_name='slug', label=_('Device Role (slug)'),
     )
     site_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='site', queryset=Site.objects.all(), label=_('Site'),
+        field_name='site', queryset=Site.objects.all(), label=_('Site (ID)'),
+    )
+    site = django_filters.ModelMultipleChoiceFilter(
+        field_name='site__slug', queryset=Site.objects.all(),
+        to_field_name='slug', label=_('Site (slug)'),
     )
     site_group_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='site_group', queryset=SiteGroup.objects.all(), label=_('Site Group'),
+        field_name='site_group', queryset=SiteGroup.objects.all(), label=_('Site Group (ID)'),
+    )
+    site_group = django_filters.ModelMultipleChoiceFilter(
+        field_name='site_group__slug', queryset=SiteGroup.objects.all(),
+        to_field_name='slug', label=_('Site Group (slug)'),
     )
     platform_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='platform', queryset=Platform.objects.all(), label=_('Platform'),
+        field_name='platform', queryset=Platform.objects.all(), label=_('Platform (ID)'),
+    )
+    platform = django_filters.ModelMultipleChoiceFilter(
+        field_name='platform__slug', queryset=Platform.objects.all(),
+        to_field_name='slug', label=_('Platform (slug)'),
     )
     tag_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='tag', queryset=Tag.objects.all(), label=_('Tag'),
+        field_name='tag', queryset=Tag.objects.all(), label=_('Tag (ID)'),
+    )
+    tag = django_filters.ModelMultipleChoiceFilter(
+        field_name='tag__slug', queryset=Tag.objects.all(),
+        to_field_name='slug', label=_('Tag (slug)'),
     )
 
     class Meta:
@@ -127,10 +167,18 @@ class PackageAssignmentFilterSet(NetBoxModelFilterSet):
 
 class MeasureAssignmentFilterSet(NetBoxModelFilterSet):
     device_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='device', queryset=Device.objects.all(), label=_('Device'),
+        field_name='device', queryset=Device.objects.all(), label=_('Device (ID)'),
+    )
+    device = django_filters.ModelMultipleChoiceFilter(
+        field_name='device__name', queryset=Device.objects.all(),
+        to_field_name='name', label=_('Device (name)'),
     )
     measure_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure'),
+        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure (ID)'),
+    )
+    measure = django_filters.ModelMultipleChoiceFilter(
+        field_name='measure__slug', queryset=ComplianceMeasure.objects.all(),
+        to_field_name='slug', label=_('Measure (slug)'),
     )
 
     class Meta:
@@ -145,19 +193,39 @@ class MeasureAssignmentFilterSet(NetBoxModelFilterSet):
 
 class ComplianceExemptionFilterSet(NetBoxModelFilterSet):
     measure_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure'),
+        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure (ID)'),
+    )
+    measure = django_filters.ModelMultipleChoiceFilter(
+        field_name='measure__slug', queryset=ComplianceMeasure.objects.all(),
+        to_field_name='slug', label=_('Measure (slug)'),
     )
     device_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='device', queryset=Device.objects.all(), label=_('Device'),
+        field_name='device', queryset=Device.objects.all(), label=_('Device (ID)'),
+    )
+    device = django_filters.ModelMultipleChoiceFilter(
+        field_name='device__name', queryset=Device.objects.all(),
+        to_field_name='name', label=_('Device (name)'),
     )
     site_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='site', queryset=Site.objects.all(), label=_('Site'),
+        field_name='site', queryset=Site.objects.all(), label=_('Site (ID)'),
+    )
+    site = django_filters.ModelMultipleChoiceFilter(
+        field_name='site__slug', queryset=Site.objects.all(),
+        to_field_name='slug', label=_('Site (slug)'),
     )
     site_group_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='site_group', queryset=SiteGroup.objects.all(), label=_('Site Group'),
+        field_name='site_group', queryset=SiteGroup.objects.all(), label=_('Site Group (ID)'),
+    )
+    site_group = django_filters.ModelMultipleChoiceFilter(
+        field_name='site_group__slug', queryset=SiteGroup.objects.all(),
+        to_field_name='slug', label=_('Site Group (slug)'),
     )
     tag_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='tag', queryset=Tag.objects.all(), label=_('Tag'),
+        field_name='tag', queryset=Tag.objects.all(), label=_('Tag (ID)'),
+    )
+    tag = django_filters.ModelMultipleChoiceFilter(
+        field_name='tag__slug', queryset=Tag.objects.all(),
+        to_field_name='slug', label=_('Tag (slug)'),
     )
     active = django_filters.BooleanFilter(method='filter_active', label=_('Currently active'))
     valid_until__lt = django_filters.DateFilter(field_name='valid_until', lookup_expr='lt')
@@ -181,10 +249,14 @@ class ComplianceExemptionFilterSet(NetBoxModelFilterSet):
 
 class ComplianceResultFilterSet(NetBoxModelFilterSet):
     device_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='device', queryset=Device.objects.all(), label=_('Device'),
+        field_name='device', queryset=Device.objects.all(), label=_('Device (ID)'),
+    )
+    device = django_filters.ModelMultipleChoiceFilter(
+        field_name='device__name', queryset=Device.objects.all(),
+        to_field_name='name', label=_('Device (name)'),
     )
     measure_id = django_filters.ModelMultipleChoiceFilter(
-        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure'),
+        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure (ID)'),
     )
     measure = django_filters.ModelMultipleChoiceFilter(
         field_name='measure__slug', queryset=ComplianceMeasure.objects.all(),
@@ -192,7 +264,10 @@ class ComplianceResultFilterSet(NetBoxModelFilterSet):
     )
     status = django_filters.MultipleChoiceFilter(choices=ComplianceResultStatusChoices)
     timestamp = django_filters.DateTimeFromToRangeFilter()
-    latest = django_filters.BooleanFilter(method='filter_latest', label=_('Latest result per device/measure'))
+    history = django_filters.BooleanFilter(
+        method='filter_noop',
+        label=_('Return full result history instead of just the latest result per device/measure'),
+    )
 
     class Meta:
         model = ComplianceResult
@@ -201,10 +276,18 @@ class ComplianceResultFilterSet(NetBoxModelFilterSet):
     def search(self, queryset, name, value):
         if not value.strip():
             return queryset
-        return queryset.filter(Q(source__icontains=value))
+        return queryset.filter(Q(source__icontains=value) | Q(device__name__icontains=value))
 
-    def filter_latest(self, queryset, name, value):
-        if not value:
+    def filter_noop(self, queryset, name, value):
+        # Actual behavior lives in filter_queryset() below -- `history` needs
+        # to affect the result set even when the param is entirely absent,
+        # which a per-field method filter can't do (django-filter skips
+        # calling it when the value is empty/unspecified).
+        return queryset
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        if self.form.cleaned_data.get('history'):
             return queryset
         latest_pks = (
             queryset.order_by('device_id', 'measure_id', '-timestamp')

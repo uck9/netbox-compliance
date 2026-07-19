@@ -7,11 +7,6 @@ from .. import services
 __all__ = ('DeviceComplianceTabView',)
 
 
-def _device_compliance_badge(obj):
-    scoring = services.score_device(obj)
-    return f"{scoring['overall_score']}%"
-
-
 class DeviceComplianceTabView(generic.ObjectView):
     """
     "Compliance" tab on the core Device detail page: resolved effective
@@ -28,7 +23,6 @@ class DeviceComplianceTabView(generic.ObjectView):
 
     tab = ViewTab(
         label='Compliance',
-        badge=_device_compliance_badge,
         weight=4000,
     )
 
@@ -39,6 +33,8 @@ class DeviceComplianceTabView(generic.ObjectView):
         packages = []
         for package in sorted(effective['packages'], key=lambda p: p.name):
             rows = sorted(effective['packages'][package], key=lambda r: (r.display_order, r.measure.name))
+            for row in rows:
+                row.value_display = services.render_display_template(row)
             packages.append({
                 'package': package,
                 'score': scoring['package_scores'][package],
@@ -47,10 +43,10 @@ class DeviceComplianceTabView(generic.ObjectView):
             })
 
         direct_rows = sorted(effective['direct'], key=lambda r: r.measure.name)
+        for row in direct_rows:
+            row.value_display = services.render_value_display(row)
 
         return {
-            'overall_score': scoring['overall_score'],
-            'compliant': scoring['compliant'],
             'packages': packages,
             'direct_rows': direct_rows,
             'exemptions_applied': effective['exemptions_applied'],

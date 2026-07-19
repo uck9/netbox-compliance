@@ -71,7 +71,8 @@ def _matching_package_assignments(device):
         if device.site.group_id:
             filters |= Q(site_group=device.site.group_id)
     if device.platform_id:
-        filters |= Q(platform=device.platform_id)
+        ancestor_ids = device.platform.get_ancestors(include_self=True).values_list('id', flat=True)
+        filters |= Q(platform__in=ancestor_ids)
     tag_ids = list(device.tags.values_list('id', flat=True))
     if tag_ids:
         filters |= Q(tag__in=tag_ids)
@@ -387,8 +388,8 @@ def render_display_template(row):
     """
     Render measure.display_template against {value, label, details}, falling
     back to display_label when the template is blank or fails to render.
-    Used by the panel, the compliance tab, and the device-status API's
-    display_text field.
+    Used by the panel, the compliance tab's Value column, and the
+    device-status API's display_text field.
     """
     if not row.measure.display_template:
         return row.display_label
@@ -495,7 +496,8 @@ def devices_with_effective_measures():
         elif assignment.site_group_id:
             qs = qs.filter(site__group_id=assignment.site_group_id)
         elif assignment.platform_id:
-            qs = qs.filter(platform_id=assignment.platform_id)
+            descendant_ids = assignment.platform.get_descendants(include_self=True).values_list('id', flat=True)
+            qs = qs.filter(platform_id__in=descendant_ids)
         elif assignment.tag_id:
             qs = qs.filter(tags=assignment.tag_id)
         else:

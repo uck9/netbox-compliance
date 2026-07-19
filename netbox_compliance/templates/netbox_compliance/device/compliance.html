@@ -1,25 +1,8 @@
 {% extends 'generic/object.html' %}
 {% load helpers %}
+{% load i18n %}
 
 {% block content %}
-  <div class="row mb-3">
-    <div class="col col-md-12">
-      <div class="card">
-        <h5 class="card-header">Overall Compliance</h5>
-        <table class="table table-hover attr-table mb-0">
-          <tr>
-            <th scope="row">Score</th>
-            <td>{{ overall_score }}%</td>
-          </tr>
-          <tr>
-            <th scope="row">Compliant</th>
-            <td>{% checkmark compliant %}</td>
-          </tr>
-        </table>
-      </div>
-    </div>
-  </div>
-
   {% for entry in packages %}
     <div class="row mb-3">
       <div class="col col-md-12">
@@ -48,8 +31,17 @@
                   <td>{{ row.weight }}</td>
                   <td>{% checkmark row.required %}</td>
                   <td>{% badge row.display_label bg_color=row.display_color %}</td>
-                  <td>{{ row.value|placeholder }}</td>
-                  <td>{% if row.result %}{{ row.result.timestamp }} ({{ row.result.source }}){% else %}{{ ''|placeholder }}{% endif %}</td>
+                  <td>{{ row.value_display|placeholder }}</td>
+                  <td>
+                    {% if row.result %}
+                      {{ row.result.timestamp }}
+                      <a href="{{ row.result.get_absolute_url }}" title="{% trans "View result details" %}" data-bs-toggle="tooltip">
+                        <i class="mdi mdi-text-box-search-outline" aria-hidden="true"></i>
+                      </a>
+                    {% else %}
+                      {{ ''|placeholder }}
+                    {% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -82,8 +74,17 @@
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
                   <td>{{ row.weight }}</td>
                   <td>{% badge row.display_label bg_color=row.display_color %}</td>
-                  <td>{{ row.value|placeholder }}</td>
-                  <td>{% if row.result %}{{ row.result.timestamp }} ({{ row.result.source }}){% else %}{{ ''|placeholder }}{% endif %}</td>
+                  <td>{{ row.value_display|placeholder }}</td>
+                  <td>
+                    {% if row.result %}
+                      {{ row.result.timestamp }}
+                      <a href="{{ row.result.get_absolute_url }}" title="{% trans "View result details" %}" data-bs-toggle="tooltip">
+                        <i class="mdi mdi-text-box-search-outline" aria-hidden="true"></i>
+                      </a>
+                    {% else %}
+                      {{ ''|placeholder }}
+                    {% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody>

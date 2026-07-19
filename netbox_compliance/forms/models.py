@@ -4,11 +4,18 @@ from django.utils.translation import gettext_lazy as _
 from dcim.models import Device, DeviceRole, Platform, Site, SiteGroup
 from extras.models import Tag
 from netbox.forms import NetBoxModelForm
-from utilities.forms.fields import CommentField, DynamicModelChoiceField, JSONField, SlugField
+from utilities.forms.fields import (
+    CommentField,
+    DynamicModelChoiceField,
+    DynamicModelMultipleChoiceField,
+    JSONField,
+    SlugField,
+)
 from utilities.forms.rendering import FieldSet
 from utilities.forms.widgets import DatePicker, DateTimePicker
 
 from ..models import (
+    SCOPE_FIELDS,
     ComplianceExemption,
     ComplianceMeasure,
     CompliancePackage,
@@ -23,6 +30,7 @@ __all__ = (
     'CompliancePackageForm',
     'PackageMeasureForm',
     'PackageAssignmentForm',
+    'PackageAssignmentBulkAssignForm',
     'MeasureAssignmentForm',
     'ComplianceExemptionForm',
     'ComplianceResultForm',
@@ -110,6 +118,47 @@ class PackageAssignmentForm(NetBoxModelForm):
             'package', 'device', 'device_role', 'site', 'site_group',
             'platform', 'tag', 'description', 'tags',
         )
+
+
+class PackageAssignmentBulkAssignForm(forms.Form):
+    """
+    Fans a single package out to many scope values in one submission
+    (e.g. several platforms at once), creating one PackageAssignment row
+    per selected value. Selections must all be in the same scope field,
+    per the one-scope-field-per-row invariant PackageAssignment.clean()
+    enforces on each resulting row.
+    """
+    package = DynamicModelChoiceField(queryset=CompliancePackage.objects.all())
+    device = DynamicModelMultipleChoiceField(queryset=Device.objects.all(), required=False, label=_('Devices'))
+    device_role = DynamicModelMultipleChoiceField(queryset=DeviceRole.objects.all(), required=False, label=_('Device Roles'))
+    site = DynamicModelMultipleChoiceField(queryset=Site.objects.all(), required=False, label=_('Sites'))
+    site_group = DynamicModelMultipleChoiceField(queryset=SiteGroup.objects.all(), required=False, label=_('Site Groups'))
+    platform = DynamicModelMultipleChoiceField(queryset=Platform.objects.all(), required=False, label=_('Platforms'))
+    tag = DynamicModelMultipleChoiceField(queryset=Tag.objects.all(), required=False, label=_('Tags'))
+    description = forms.CharField(
+        required=False, widget=forms.Textarea(attrs={'rows': 3}),
+        help_text=_('Applied to every assignment created.'),
+    )
+
+    fieldsets = (
+        FieldSet('package', 'description', name=_('Package')),
+        FieldSet(*SCOPE_FIELDS, name=_('Scope (select values in exactly one field)')),
+    )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        filled_fields = [field for field in SCOPE_FIELDS if cleaned_data.get(field)]
+        if len(filled_fields) == 0:
+            raise forms.ValidationError(
+                _('Select at least one value in exactly one of: %(fields)s.') % {'fields': ', '.join(SCOPE_FIELDS)}
+            )
+        if len(filled_fields) > 1:
+            raise forms.ValidationError(
+                _('Selections must be in exactly one scope field; found values in: %(fields)s.')
+                % {'fields': ', '.join(filled_fields)}
+            )
+        cleaned_data['scope_field'] = filled_fields[0]
+        return cleaned_data
 
 
 class MeasureAssignmentForm(NetBoxModelForm):

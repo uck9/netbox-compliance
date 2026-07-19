@@ -9,12 +9,13 @@ __all__ = ('ComplianceResultSerializer',)
 
 class ComplianceResultSerializer(NetBoxModelSerializer):
     device = serializers.PrimaryKeyRelatedField(queryset=Device.objects.all())
+    device_name = serializers.CharField(source='device.name', read_only=True)
     measure = serializers.PrimaryKeyRelatedField(queryset=ComplianceMeasure.objects.all())
 
     class Meta:
         model = ComplianceResult
         fields = (
-            'id', 'url', 'display', 'device', 'measure', 'status', 'value', 'timestamp',
+            'id', 'url', 'display', 'device', 'device_name', 'measure', 'status', 'value', 'timestamp',
             'source', 'details', 'tags', 'custom_fields', 'created', 'last_updated',
         )
-        brief_fields = ('id', 'url', 'display', 'device', 'measure', 'status')
+        brief_fields = ('id', 'url', 'display', 'device', 'device_name', 'measure', 'status')

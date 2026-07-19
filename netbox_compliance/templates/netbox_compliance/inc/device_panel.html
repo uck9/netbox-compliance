@@ -5,19 +5,27 @@
     <tbody>
       {% for entry in panel.packages %}
         <tr>
-          <td class="w-1">{% badge '' bg_color=entry.traffic_light show_empty=True %}</td>
           <td><a href="{{ tab_url }}#package-{{ entry.package.slug }}">{{ entry.package.name }}</a></td>
+          <td class="w-1">{% badge '' bg_color=entry.traffic_light show_empty=True %}</td>
           <td>{{ entry.score }}%</td>
           <td class="text-end text-muted">
             {% if entry.oldest_result_age %}{{ entry.oldest_result_age|timesince }} ago{% else %}{{ ''|placeholder }}{% endif %}
           </td>
         </tr>
       {% endfor %}
+      {% if panel.packages and panel.measures %}
+        <tr>
+          <td colspan="4" class="p-0"><hr class="my-0"></td>
+        </tr>
+      {% endif %}
       {% for entry in panel.measures %}
         <tr>
-          <td class="w-1">{% badge entry.row.display_label bg_color=entry.display_color %}</td>
           <td>{{ entry.row.measure.name }}</td>
-          <td colspan="2">{{ entry.display_text }}</td>
+          <td class="w-1">{% badge entry.row.display_label bg_color=entry.display_color %}</td>
+          <td>{{ entry.display_text }}</td>
+          <td class="text-end text-muted">
+            {% if entry.row.result %}{{ entry.row.result.timestamp|timesince }} ago{% else %}{{ ''|placeholder }}{% endif %}
+          </td>
         </tr>
       {% endfor %}
     </tbody>

@@ -10,6 +10,7 @@ from .measures import ComplianceMeasure, CompliancePackage
 __all__ = (
     'PackageAssignment',
     'MeasureAssignment',
+    'SCOPE_FIELDS',
 )
 
 SCOPE_FIELDS = ('device', 'device_role', 'site', 'site_group', 'platform', 'tag')

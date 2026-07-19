@@ -251,10 +251,10 @@ class ComplianceResultLatestFilterTest(ComplianceTestMixin, APITestCase):
     model = ComplianceResult
     user_permissions = ('netbox_compliance.view_complianceresult',)
 
-    def test_latest_filter_returns_one_row_per_device_measure(self):
+    def _make_older_and_newer(self, slug):
         from django.utils import timezone
 
-        measure = make_measure('latest-measure')
+        measure = make_measure(slug)
         device = self.make_device()
         older = ComplianceResult.objects.create(
             device=device, measure=measure, status='pass', value='true',
@@ -264,14 +264,28 @@ class ComplianceResultLatestFilterTest(ComplianceTestMixin, APITestCase):
             device=device, measure=measure, status='fail', value='false',
             timestamp=timezone.now(), source='test',
         )
+        return older, newer
+
+    def test_default_returns_only_latest_row_per_device_measure(self):
+        older, newer = self._make_older_and_newer('latest-measure-default')
 
         url = reverse('plugins-api:netbox_compliance-api:complianceresult-list')
-        response = self.client.get(f'{url}?latest=true', **self.header)
+        response = self.client.get(url, **self.header)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         ids = {row['id'] for row in response.data['results']}
         self.assertEqual(ids, {newer.pk})
         self.assertNotIn(older.pk, ids)
+
+    def test_history_true_returns_full_history(self):
+        older, newer = self._make_older_and_newer('latest-measure-history')
+
+        url = reverse('plugins-api:netbox_compliance-api:complianceresult-list')
+        response = self.client.get(f'{url}?history=true', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        ids = {row['id'] for row in response.data['results']}
+        self.assertEqual(ids, {older.pk, newer.pk})
 
 
 class DeviceComplianceStatusAPITest(ComplianceTestMixin, APITestCase):

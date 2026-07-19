@@ -66,7 +66,7 @@ class ComplianceResult(NetBoxModel):
         verbose_name_plural = _('compliance results')
 
     def __str__(self):
-        return f'{self.device}: {self.measure} = {self.status} ({self.timestamp:%Y-%m-%d})'
+        return f'{self.device}: {self.measure}'
 
     def get_absolute_url(self):
         return reverse('plugins:netbox_compliance:complianceresult', args=[self.pk])

@@ -48,6 +48,12 @@ package_assignment_buttons = [
         icon_class='mdi mdi-plus-thick',
         permissions=['netbox_compliance.add_packageassignment'],
     ),
+    PluginMenuButton(
+        link='plugins:netbox_compliance:packageassignment_bulk_assign',
+        title='Bulk Assign',
+        icon_class='mdi mdi-plus-box-multiple',
+        permissions=['netbox_compliance.add_packageassignment'],
+    ),
 ]
 
 measure_assignment_buttons = [

@@ -67,12 +67,14 @@ class CompliancePackageSerializer(NetBoxModelSerializer):
 
 class PackageMeasureSerializer(NetBoxModelSerializer):
     package = serializers.PrimaryKeyRelatedField(queryset=CompliancePackage.objects.all())
+    package_name = serializers.CharField(source='package.name', read_only=True)
     measure = serializers.PrimaryKeyRelatedField(queryset=ComplianceMeasure.objects.all())
+    measure_name = serializers.CharField(source='measure.name', read_only=True)
 
     class Meta:
         model = PackageMeasure
         fields = (
-            'id', 'url', 'display', 'package', 'measure', 'weight', 'required',
-            'display_order', 'tags', 'custom_fields', 'created', 'last_updated',
+            'id', 'url', 'display', 'package', 'package_name', 'measure', 'measure_name',
+            'weight', 'required', 'display_order', 'tags', 'custom_fields', 'created', 'last_updated',
         )
-        brief_fields = ('id', 'url', 'display', 'package', 'measure')
+        brief_fields = ('id', 'url', 'display', 'package', 'package_name', 'measure', 'measure_name')
