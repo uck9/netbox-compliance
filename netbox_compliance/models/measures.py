@@ -60,6 +60,13 @@ class ComplianceMeasure(NetBoxModel):
         verbose_name=_('slug'),
         help_text=_('Used by external scripts when posting results'),
     )
+    title = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name=_('title'),
+        help_text=_('Short human-readable label, if different from name (e.g. name/slug are a '
+                    'code like "AAA-004", title is a descriptive label for display)'),
+    )
     description = models.TextField(
         blank=True,
         verbose_name=_('description'),

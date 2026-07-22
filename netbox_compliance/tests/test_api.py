@@ -346,3 +346,99 @@ class DeviceComplianceStatusAPITest(ComplianceTestMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         measure_data = response.data['direct_measures'][0]
         self.assertEqual(measure_data['display_text'], '17.9.4a (target 17.12.3)')
+
+
+class DeviceEffectiveMeasuresAPITest(ComplianceTestMixin, APITestCase):
+    model = ComplianceResult
+    user_permissions = ('netbox_compliance.view_complianceresult', 'dcim.view_device')
+
+    def _url(self, device):
+        return reverse('plugins-api:netbox_compliance-api:device-effective-measures', kwargs={'pk': device.pk})
+
+    def test_returns_definition_fields_with_no_result_data(self):
+        from ..models import CompliancePackage, PackageAssignment, PackageMeasure
+        from ..choices import CompliancePackageStatusChoices
+
+        measure = make_measure(
+            'ntp-sync-measure', result_type=ComplianceMeasureResultTypeChoices.BOOLEAN,
+            required_detail_keys=['running'],
+        )
+        package = CompliancePackage.objects.create(
+            name='CorpBaseline', slug='corp-baseline', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+        PackageMeasure.objects.create(package=package, measure=measure, weight=2, required=True)
+        device = self.make_device(site=self.site)
+        PackageAssignment.objects.create(package=package, site=self.site)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['device'], device.pk)
+        row = response.data['measures'][0]
+        self.assertEqual(row['measure'], 'ntp-sync-measure')
+        self.assertEqual(row['result_type'], 'boolean')
+        self.assertEqual(row['required_detail_keys'], ['running'])
+        self.assertEqual(row['weight'], 2)
+        self.assertTrue(row['required'])
+        self.assertEqual(row['source'], ['corp-baseline'])
+        self.assertNotIn('status', row)
+        self.assertNotIn('value', row)
+        self.assertNotIn('result_timestamp', row)
+
+    def test_title_is_exposed_alongside_name(self):
+        from ..models import MeasureAssignment
+
+        measure = make_measure('aaa-004', title='TACACS source-interface bound to Loopback0')
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        row = response.data['measures'][0]
+        self.assertEqual(row['measure_name'], 'aaa-004')
+        self.assertEqual(row['measure_title'], 'TACACS source-interface bound to Loopback0')
+
+    def test_direct_assignment_has_null_source_and_no_package_dependency(self):
+        from ..models import MeasureAssignment
+
+        measure = make_measure('direct-only-measure')
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        row = response.data['measures'][0]
+        self.assertEqual(row['measure'], 'direct-only-measure')
+        self.assertIsNone(row['source'])
+        self.assertTrue(row['required'])
+
+    def test_exempted_measure_is_excluded(self):
+        from ..models import ComplianceExemption, MeasureAssignment
+
+        measure = make_measure('exempted-measure')
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+        ComplianceExemption.objects.create(device=device, measure=measure, justification='not applicable here')
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['measures'], [])
+
+    def test_percentage_measure_exposes_pass_threshold(self):
+        from ..models import MeasureAssignment
+
+        measure = make_measure(
+            'percentage-measure', result_type=ComplianceMeasureResultTypeChoices.PERCENTAGE,
+            pass_threshold=Decimal('90.00'),
+        )
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        row = response.data['measures'][0]
+        self.assertEqual(row['pass_threshold'], 90.0)

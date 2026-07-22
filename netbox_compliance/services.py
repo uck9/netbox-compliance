@@ -562,6 +562,7 @@ def _measure_row_dict(row):
     return {
         'measure': row.measure.slug,
         'measure_name': row.measure.name,
+        'measure_title': row.measure.title,
         'severity': row.measure.severity,
         'weight': row.weight,
         'display_order': row.display_order,
@@ -577,6 +578,44 @@ def _measure_row_dict(row):
         'credit': row.credit,
         'display_text': render_display_template(row),
     }
+
+
+def _measure_definition_dict(row):
+    """Definition-only fields for an EffectiveMeasure row -- no result/status/scoring data.
+    Used by the effective-measures API for external check-runners (e.g. the standalone
+    config-compliance-engine) that need to know *which* measures currently apply to a device
+    and *how* to interpret a posted value, without any of the "what did we last see" data the
+    device-status endpoint bundles in via `_measure_row_dict`."""
+    measure = row.measure
+    return {
+        'measure': measure.slug,
+        'measure_name': measure.name,
+        'measure_title': measure.title,
+        'category': measure.category,
+        'severity': measure.severity,
+        'result_type': measure.result_type,
+        'pass_threshold': float(measure.pass_threshold) if measure.pass_threshold is not None else None,
+        'value_map': measure.value_map,
+        'required_detail_keys': measure.required_detail_keys,
+        'max_result_age_days': measure.max_result_age_days,
+        'weight': row.weight,
+        'required': row.required,
+        'source': [p.slug for p in row.source_packages] or None,
+    }
+
+
+def effective_measure_definitions(device):
+    """Flat list of `_measure_definition_dict` rows -- the measure set currently assigned to
+    this device (via package or direct assignment, minus exemptions), independent of any
+    result/scoring state. Built on `get_effective_measures`, the same single source of truth
+    used everywhere else, rather than re-deriving assignment resolution here."""
+    effective = get_effective_measures(device)
+    rows = []
+    for package_rows in effective['packages'].values():
+        rows.extend(package_rows)
+    rows.extend(effective['direct'])
+    rows.sort(key=lambda r: r.measure.slug)
+    return [_measure_definition_dict(row) for row in rows]
 
 
 def build_snapshot_data(device):

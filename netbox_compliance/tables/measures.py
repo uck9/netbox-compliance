@@ -27,12 +27,12 @@ class ComplianceMeasureTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = ComplianceMeasure
         fields = (
-            'pk', 'id', 'name', 'slug', 'category', 'severity', 'status', 'result_type',
+            'pk', 'id', 'name', 'slug', 'title', 'category', 'severity', 'status', 'result_type',
             'max_result_age_days', 'show_on_device_panel', 'panel_display_order',
             'package_count', 'description', 'comments',
             'tags', 'created', 'last_updated', 'actions',
         )
-        default_columns = ('pk', 'name', 'category', 'severity', 'status', 'result_type', 'max_result_age_days', 'package_count')
+        default_columns = ('pk', 'name', 'title', 'category', 'severity', 'status', 'result_type', 'max_result_age_days', 'package_count')
 
 
 class CompliancePackageTable(NetBoxTable):

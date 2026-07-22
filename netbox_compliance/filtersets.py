@@ -43,13 +43,14 @@ class ComplianceMeasureFilterSet(NetBoxModelFilterSet):
 
     class Meta:
         model = ComplianceMeasure
-        fields = ('id', 'name', 'slug', 'max_result_age_days')
+        fields = ('id', 'name', 'slug', 'title', 'max_result_age_days')
 
     def search(self, queryset, name, value):
         if not value.strip():
             return queryset
         return queryset.filter(
-            Q(name__icontains=value) | Q(slug__icontains=value) | Q(description__icontains=value)
+            Q(name__icontains=value) | Q(slug__icontains=value) | Q(title__icontains=value)
+            | Q(description__icontains=value)
         )
 
 

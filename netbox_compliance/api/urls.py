@@ -19,6 +19,11 @@ router.register('snapshots', views.ComplianceSnapshotViewSet)
 urlpatterns = [
     path('results/bulk/', views.BulkResultIngestView.as_view(), name='result-bulk'),
     path('devices/<int:pk>/status/', views.DeviceComplianceStatusView.as_view(), name='device-status'),
+    path(
+        'devices/<int:pk>/effective-measures/',
+        views.DeviceEffectiveMeasuresView.as_view(),
+        name='device-effective-measures',
+    ),
     path('reports/<str:period>/', views.MonthlyReportView.as_view(), name='monthly-report'),
 ]
 

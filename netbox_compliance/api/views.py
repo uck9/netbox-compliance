@@ -21,7 +21,9 @@ from ..models import (
     PackageAssignment,
     PackageMeasure,
 )
-from ..services import build_snapshot_data, enum_credit_status, get_effective_measures, score_device
+from ..services import (
+    build_snapshot_data, effective_measure_definitions, enum_credit_status, get_effective_measures, score_device,
+)
 from . import serializers
 from .. import filtersets
 
@@ -36,6 +38,7 @@ __all__ = (
     'ComplianceSnapshotViewSet',
     'BulkResultIngestView',
     'DeviceComplianceStatusView',
+    'DeviceEffectiveMeasuresView',
     'MonthlyReportView',
 )
 
@@ -306,6 +309,23 @@ class DeviceComplianceStatusView(APIView):
             'overall_score': overall_score,
             'compliant': compliant,
             **data,
+        })
+
+
+class DeviceEffectiveMeasuresView(APIView):
+    """GET /api/plugins/compliance/devices/{id}/effective-measures/ -- the measure *definitions*
+    (slug, result_type, pass_threshold/value_map, required_detail_keys, weight/required, source)
+    currently assigned to this device via package or direct assignment, minus exemptions. No
+    result/score data -- for external check-runners deciding what to evaluate, not for display.
+    See DeviceComplianceStatusView for the result-bearing dashboard payload."""
+    queryset = Device.objects.all()
+
+    def get(self, request, pk):
+        device = get_object_or_404(Device, pk=pk)
+        return Response({
+            'device': device.pk,
+            'device_name': str(device),
+            'measures': effective_measure_definitions(device),
         })
 
 

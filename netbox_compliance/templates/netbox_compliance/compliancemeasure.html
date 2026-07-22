@@ -16,6 +16,10 @@
             <td><code>{{ object.slug }}</code></td>
           </tr>
           <tr>
+            <th scope="row">Title</th>
+            <td>{{ object.title|placeholder }}</td>
+          </tr>
+          <tr>
             <th scope="row">Category</th>
             <td>{% badge object.get_category_display bg_color=object.get_category_color %}</td>
           </tr>

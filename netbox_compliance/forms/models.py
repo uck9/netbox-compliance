@@ -47,7 +47,7 @@ class ComplianceMeasureForm(NetBoxModelForm):
     required_detail_keys = JSONField(required=False, help_text=_('e.g. ["running", "target"]'))
 
     fieldsets = (
-        FieldSet('name', 'slug', 'description', 'category', 'severity', 'status', 'tags', name=_('Measure')),
+        FieldSet('name', 'slug', 'title', 'description', 'category', 'severity', 'status', 'tags', name=_('Measure')),
         FieldSet('result_type', 'pass_threshold', 'value_map', name=_('Result Type')),
         FieldSet('max_result_age_days', name=_('Staleness')),
         FieldSet(
@@ -59,7 +59,7 @@ class ComplianceMeasureForm(NetBoxModelForm):
     class Meta:
         model = ComplianceMeasure
         fields = (
-            'name', 'slug', 'description', 'category', 'severity',
+            'name', 'slug', 'title', 'description', 'category', 'severity',
             'max_result_age_days', 'status', 'comments', 'result_type',
             'pass_threshold', 'value_map', 'show_on_device_panel', 'panel_display_order',
             'display_template', 'required_detail_keys', 'tags',
