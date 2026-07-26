@@ -3,13 +3,22 @@
 {% load i18n %}
 
 {% block content %}
+  <style>
+    .compliance-passing-toggle td { cursor: pointer; }
+    .compliance-passing-toggle .mdi-chevron-right { transition: transform 0.15s ease-in-out; }
+    .compliance-passing-toggle[aria-expanded="true"] .mdi-chevron-right { transform: rotate(90deg); }
+  </style>
   {% for entry in packages %}
     <div class="row mb-3">
       <div class="col col-md-12">
         <div class="card">
           <h5 class="card-header d-flex justify-content-between align-items-center" id="package-{{ entry.package.slug }}">
             <a href="{{ entry.package.get_absolute_url }}">{{ entry.package.name }}</a>
-            <span>{% badge '' bg_color=entry.traffic_light show_empty=True %} {{ entry.score }}%</span>
+            <span>
+              {% badge '' bg_color=entry.traffic_light show_empty=True %} {{ entry.score }}%
+              <span class="badge text-bg-danger ms-2">{{ entry.failing_count }} {% trans "failing" %}</span>
+              <span class="badge text-bg-success ms-1">{{ entry.passing_count }} {% trans "passing" %}</span>
+            </span>
           </h5>
           <table class="table table-hover mb-0">
             <thead>
@@ -24,7 +33,37 @@
               </tr>
             </thead>
             <tbody>
-              {% for row in entry.rows %}
+              {% for row in entry.failing_rows %}
+                <tr>
+                  <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
+                  <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
+                  <td>{{ row.weight }}</td>
+                  <td>{% checkmark row.required %}</td>
+                  <td>{% badge row.display_label bg_color=row.display_color %}</td>
+                  <td>{{ row.value_display|placeholder }}</td>
+                  <td>
+                    {% if row.result %}
+                      {{ row.result.timestamp }}
+                      <a href="{{ row.result.get_absolute_url }}" title="{% trans "View result details" %}" data-bs-toggle="tooltip">
+                        <i class="mdi mdi-text-box-search-outline" aria-hidden="true"></i>
+                      </a>
+                    {% else %}
+                      {{ ''|placeholder }}
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+              {% if entry.passing_rows %}
+                <tr class="compliance-passing-toggle" data-bs-toggle="collapse" data-bs-target="#passing-{{ entry.package.slug }}" role="button" aria-expanded="false" aria-controls="passing-{{ entry.package.slug }}">
+                  <td colspan="7" class="text-secondary">
+                    <i class="mdi mdi-chevron-right" aria-hidden="true"></i>
+                    {% blocktrans count counter=entry.passing_count %}{{ counter }} passing measure (click to expand){% plural %}{{ counter }} passing measures (click to expand){% endblocktrans %}
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+            <tbody class="collapse" id="passing-{{ entry.package.slug }}">
+              {% for row in entry.passing_rows %}
                 <tr>
                   <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>

@@ -3,6 +3,7 @@ from netbox.views import generic
 from utilities.views import ViewTab
 
 from .. import services
+from ..choices import EffectiveStatusChoices
 
 __all__ = ('DeviceComplianceTabView',)
 
@@ -35,11 +36,17 @@ class DeviceComplianceTabView(generic.ObjectView):
             rows = sorted(effective['packages'][package], key=lambda r: (r.display_order, r.measure.name))
             for row in rows:
                 row.value_display = services.render_display_template(row)
+            passing_rows = [row for row in rows if row.status == EffectiveStatusChoices.PASS]
+            failing_rows = [row for row in rows if row.status != EffectiveStatusChoices.PASS]
             packages.append({
                 'package': package,
                 'score': scoring['package_scores'][package],
                 'traffic_light': services.package_traffic_light(instance, package, rows=rows),
                 'rows': rows,
+                'passing_rows': passing_rows,
+                'failing_rows': failing_rows,
+                'passing_count': len(passing_rows),
+                'failing_count': len(failing_rows),
             })
 
         direct_rows = sorted(effective['direct'], key=lambda r: r.measure.name)
