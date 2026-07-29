@@ -58,13 +58,23 @@ class CompliancePackageTable(NetBoxTable):
 class PackageMeasureTable(NetBoxTable):
     package = tables.Column(linkify=True)
     measure = tables.Column(linkify=True)
+    measure_severity = ChoiceFieldColumn(
+        accessor='measure__severity', verbose_name='Criticality',
+        color=lambda record: record.measure.get_severity_color(),
+    )
+    measure_short_description = tables.Column(
+        accessor='measure__short_description', verbose_name='Short Description', orderable=False,
+    )
     required = columns.BooleanColumn()
     tags = columns.TagColumn(url_name='plugins:netbox_compliance:packagemeasure_list')
 
     class Meta(NetBoxTable.Meta):
         model = PackageMeasure
         fields = (
-            'pk', 'id', 'package', 'measure', 'weight', 'required', 'display_order',
-            'tags', 'created', 'last_updated', 'actions',
+            'pk', 'id', 'package', 'measure', 'measure_severity', 'measure_short_description',
+            'weight', 'required', 'display_order', 'tags', 'created', 'last_updated', 'actions',
         )
-        default_columns = ('pk', 'package', 'measure', 'weight', 'required', 'display_order')
+        default_columns = (
+            'pk', 'package', 'measure', 'measure_severity', 'measure_short_description',
+            'weight', 'required', 'display_order',
+        )

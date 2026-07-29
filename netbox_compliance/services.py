@@ -74,6 +74,55 @@ class EffectiveMeasure:
     credit: int = 0
 
 
+def is_device_eligible_for_compliance(device):
+    """
+    Whether a device should ever resolve any effective measures at all.
+    Kept as a plugin-side concept (not the collector's) since compliance
+    stats/reporting live here -- see `eligible_devices_qs` for the bulk
+    queryset equivalent used by list/scope-building code.
+
+    False for:
+    - A device with no primary IP at all (v4 or v6): unreachable devices
+      can never produce real collector results, so counting them just shows
+      up as a permanent gap rather than a meaningful pass/fail.
+    - A non-master member of a Virtual Chassis: compliance is tracked
+      against the stack's single primary member (its VC master), not every
+      physical unit individually.
+
+    True for every other device, including: a device with no Virtual
+    Chassis at all (e.g. firewalls -- there's no "master" concept to apply,
+    so each device is independently eligible on its own), a VC's actual
+    master member, and -- deliberately fail-open -- every member of a VC
+    that has no master designated in NetBox yet, so an unconfigured stack
+    doesn't silently vanish from compliance coverage entirely.
+    """
+    if device.primary_ip4_id is None and device.primary_ip6_id is None:
+        return False
+    if device.virtual_chassis_id and device.virtual_chassis.master_id:
+        return device.pk == device.virtual_chassis.master_id
+    return True
+
+
+def eligible_devices_qs():
+    """Bulk-queryset equivalent of `is_device_eligible_for_compliance` -- the base queryset for
+    any function that builds a device list/count rather than resolving one device at a time
+    (`devices_matching_assignment_scope`, `devices_with_effective_measures`), so scope-building
+    and single-device resolution can never drift apart on what counts as eligible."""
+    from django.db.models import F
+
+    from dcim.models import Device
+
+    return (
+        Device.objects.all()
+        .exclude(
+            Q(virtual_chassis__isnull=False)
+            & Q(virtual_chassis__master__isnull=False)
+            & ~Q(pk=F('virtual_chassis__master_id'))
+        )
+        .exclude(primary_ip4__isnull=True, primary_ip6__isnull=True)
+    )
+
+
 def _matching_package_assignments(device):
     """
     PackageAssignment rows whose scope matches this device, restricted to
@@ -116,6 +165,8 @@ def _matching_exemptions(device, today=None):
         filters |= Q(site=device.site_id)
         if device.site.group_id:
             filters |= Q(site_group=device.site.group_id)
+    if device.tenant_id:
+        filters |= Q(tenant=device.tenant_id)
     tag_ids = list(device.tags.values_list('id', flat=True))
     if tag_ids:
         filters |= Q(tag__in=tag_ids)
@@ -124,7 +175,7 @@ def _matching_exemptions(device, today=None):
         ComplianceExemption.objects
         .filter(filters, valid_from__lte=today)
         .filter(Q(valid_until__isnull=True) | Q(valid_until__gte=today))
-        .select_related('measure')
+        .select_related('measure', 'package')
     )
 
 
@@ -371,13 +422,28 @@ def get_effective_measures(device):
             'exemptions_applied': [ComplianceExemption, ...],
         }
 
-    Exempted measures are removed from 'packages'/'direct' (and therefore
-    from scoring) but any exemption that actually removed a would-be
-    effective measure is reported in 'exemptions_applied' for audit/display
-    purposes.
+    Exempted measures -- individually, or every measure in an exempted
+    package (see ComplianceExemption.package) -- are removed from
+    'packages'/'direct' (and therefore from scoring), regardless of how the
+    package itself was assigned to this device (direct, role, site,
+    platform, ...). Any exemption that actually removed a would-be
+    effective measure or package is reported in 'exemptions_applied' for
+    audit/display purposes.
+
+    A device that isn't eligible for compliance tracking at all (see
+    `is_device_eligible_for_compliance` -- no primary IP, or a non-master VC
+    member) always resolves to the empty set here, regardless of what
+    assignments/direct measures would otherwise apply -- this is what makes
+    every consumer (device compliance tab, snapshot generation via
+    `devices_with_effective_measures`, the effective-measures API) agree
+    with each other without each needing its own eligibility check.
     """
+    if not is_device_eligible_for_compliance(device):
+        return {'packages': {}, 'direct': [], 'exemptions_applied': []}
+
     exemptions = list(_matching_exemptions(device))
-    exempted_measure_ids = {e.measure_id for e in exemptions}
+    exempted_measure_ids = {e.measure_id for e in exemptions if e.measure_id}
+    exempted_package_ids = {e.package_id for e in exemptions if e.package_id}
 
     assignments = list(_matching_package_assignments(device))
     package_measure_qs = list(
@@ -391,12 +457,15 @@ def get_effective_measures(device):
     packages = {}
     seen_package_measures = set()
     would_be_measure_ids = set()
+    would_be_package_ids = {pm.package_id for pm in package_measure_qs}
     for pm in package_measure_qs:
         key = (pm.package_id, pm.measure_id)
         if key in seen_package_measures:
             continue
         seen_package_measures.add(key)
         would_be_measure_ids.add(pm.measure_id)
+        if pm.package_id in exempted_package_ids:
+            continue
         if pm.measure_id in exempted_measure_ids:
             continue
         packages.setdefault(pm.package, []).append(EffectiveMeasure(
@@ -427,7 +496,11 @@ def get_effective_measures(device):
             source_packages=[],
         ))
 
-    exemptions_applied = [e for e in exemptions if e.measure_id in would_be_measure_ids]
+    exemptions_applied = [
+        e for e in exemptions
+        if (e.measure_id and e.measure_id in would_be_measure_ids)
+        or (e.package_id and e.package_id in would_be_package_ids)
+    ]
 
     all_measure_ids = {row.measure.pk for rows in packages.values() for row in rows}
     all_measure_ids |= {row.measure.pk for row in direct}
@@ -646,7 +719,8 @@ def build_snapshot_data(device):
     exemptions_data = []
     for exemption in effective['exemptions_applied']:
         exemptions_data.append({
-            'measure': exemption.measure.slug,
+            'measure': exemption.measure.slug if exemption.measure else None,
+            'package': exemption.package.slug if exemption.package else None,
             'scope': _exemption_scope_label(exemption),
             'justification': exemption.justification,
         })
@@ -660,11 +734,112 @@ def build_snapshot_data(device):
 
 
 def _exemption_scope_label(exemption):
-    for field_name in ('device', 'site', 'site_group', 'tag'):
+    for field_name in ('device', 'site', 'site_group', 'tag', 'tenant'):
         value = getattr(exemption, field_name)
         if value:
             return f'{field_name}:{value}'
     return ''
+
+
+def devices_matching_assignment_scope(assignment):
+    """
+    Devices matched by a single PackageAssignment's scope field alone
+    (independent of package status/exemptions) -- the same scope-matching
+    rules `_matching_package_assignments` applies in the device -> assignment
+    direction, just inverted (assignment -> devices). Platform scope walks
+    descendants (`get_descendants(include_self=True)`) so assigning to a
+    parent platform also matches every child platform, not just an exact
+    match on the parent itself.
+
+    Shared by `devices_with_effective_measures` (snapshot scoping) and the
+    CompliancePackage detail view's device count -- per this module's own
+    single-source-of-truth intent (see module docstring), any future
+    scope-matching change (e.g. a new scope field) only needs to happen here.
+
+    Built on `eligible_devices_qs` (not a bare `Device.objects.all()`) so a
+    non-master VC member or no-primary-IP device never appears here even
+    when the assignment scopes directly to it by device -- consistent with
+    `get_effective_measures` short-circuiting to empty for that same device.
+    """
+    qs = eligible_devices_qs()
+    if assignment.device_id:
+        return qs.filter(pk=assignment.device_id)
+    if assignment.device_role_id:
+        return qs.filter(role_id=assignment.device_role_id)
+    if assignment.site_id:
+        return qs.filter(site_id=assignment.site_id)
+    if assignment.site_group_id:
+        return qs.filter(site__group_id=assignment.site_group_id)
+    if assignment.platform_id:
+        descendant_ids = assignment.platform.get_descendants(include_self=True).values_list('id', flat=True)
+        return qs.filter(platform_id__in=descendant_ids)
+    if assignment.tag_id:
+        return qs.filter(tags=assignment.tag_id)
+    return Device.objects.none()
+
+
+def devices_matching_exemption_scope(exemption):
+    """
+    Devices matched by a single ComplianceExemption's scope field alone --
+    the `_matching_exemptions` device -> exemption direction, inverted, same
+    "invert one function's scope logic" pattern as
+    `devices_matching_assignment_scope`. No date-validity check here (that's
+    the caller's job, same division of responsibility `_matching_exemptions`
+    already uses); no platform branch (exemptions don't scope by platform).
+    """
+    from dcim.models import Device
+
+    qs = Device.objects.all()
+    if exemption.device_id:
+        return qs.filter(pk=exemption.device_id)
+    if exemption.site_id:
+        return qs.filter(site_id=exemption.site_id)
+    if exemption.site_group_id:
+        return qs.filter(site__group_id=exemption.site_group_id)
+    if exemption.tag_id:
+        return qs.filter(tags=exemption.tag_id)
+    if exemption.tenant_id:
+        return qs.filter(tenant_id=exemption.tenant_id)
+    return Device.objects.none()
+
+
+def devices_for_package(package):
+    """
+    Every device currently in a CompliancePackage's scope -- the union of
+    `devices_matching_assignment_scope` across all of the package's
+    PackageAssignment rows, minus any device covered by a currently-active
+    package-level ComplianceExemption for this same package (device/site/
+    site_group/tag/tenant scoped) -- a device excluded via a tenant-scoped
+    (or any other scope) package exemption should not show up as "in scope"
+    here, since from the user's perspective it isn't.
+
+    Deliberately does NOT account for measure-level exemptions that happen
+    to cover every measure in the package for a device -- that's a much
+    costlier per-device computation (this stays a handful of bulk queries
+    regardless of device count) and a different, rarer case than "I excluded
+    this package for this device/tenant", which is what this resolves.
+
+    Shared by the CompliancePackage detail view's device count and its
+    Devices tab, so both always agree.
+    """
+    from dcim.models import Device
+
+    device_ids = set()
+    for assignment in package.assignments.all():
+        device_ids.update(devices_matching_assignment_scope(assignment).values_list('pk', flat=True))
+
+    today = date.today()
+    active_exemptions = (
+        ComplianceExemption.objects
+        .filter(package=package, valid_from__lte=today)
+        .filter(Q(valid_until__isnull=True) | Q(valid_until__gte=today))
+    )
+    exempted_device_ids = set()
+    for exemption in active_exemptions:
+        exempted_device_ids.update(devices_matching_exemption_scope(exemption).values_list('pk', flat=True))
+
+    device_ids -= exempted_device_ids
+    return Device.objects.filter(pk__in=device_ids).select_related('virtual_chassis')
 
 
 def devices_with_effective_measures():
@@ -672,34 +847,24 @@ def devices_with_effective_measures():
     Every dcim.Device with at least one PackageAssignment or
     MeasureAssignment that could resolve to an effective measure -- used to
     scope which devices get a monthly snapshot.
-    """
-    from dcim.models import Device
 
+    Filtered through `eligible_devices_qs` -- a direct MeasureAssignment can
+    technically name an ineligible device (no primary IP, or a non-master VC
+    member), and `devices_matching_assignment_scope`'s own eligibility
+    filtering doesn't cover that path since it's a different assignment
+    type. `get_effective_measures` would resolve empty for it anyway (so
+    `generate_snapshots_for_period`'s existing empty-result skip already
+    covers correctness), but filtering here avoids that wasted resolution.
+    """
     package_assignments = PackageAssignment.objects.filter(package__status=CompliancePackageStatusChoices.ACTIVE)
     device_ids = set()
 
     for assignment in package_assignments.select_related('site__group'):
-        qs = Device.objects.all()
-        if assignment.device_id:
-            qs = qs.filter(pk=assignment.device_id)
-        elif assignment.device_role_id:
-            qs = qs.filter(role_id=assignment.device_role_id)
-        elif assignment.site_id:
-            qs = qs.filter(site_id=assignment.site_id)
-        elif assignment.site_group_id:
-            qs = qs.filter(site__group_id=assignment.site_group_id)
-        elif assignment.platform_id:
-            descendant_ids = assignment.platform.get_descendants(include_self=True).values_list('id', flat=True)
-            qs = qs.filter(platform_id__in=descendant_ids)
-        elif assignment.tag_id:
-            qs = qs.filter(tags=assignment.tag_id)
-        else:
-            continue
-        device_ids.update(qs.values_list('pk', flat=True))
+        device_ids.update(devices_matching_assignment_scope(assignment).values_list('pk', flat=True))
 
     device_ids.update(MeasureAssignment.objects.values_list('device_id', flat=True))
 
-    return Device.objects.filter(pk__in=device_ids)
+    return eligible_devices_qs().filter(pk__in=device_ids)
 
 
 def generate_snapshots_for_period(period):

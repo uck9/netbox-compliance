@@ -1,8 +1,9 @@
 from datetime import date
 
-from dcim.models import Device
+from dcim.models import Device, Interface
 from django.test import TestCase
 from django.utils import timezone
+from ipam.models import IPAddress
 
 from ..choices import (
     ComplianceMeasureCategoryChoices,
@@ -66,6 +67,10 @@ class SnapshotIdempotencyTest(ComplianceTestMixin, TestCase):
         device = Device.objects.create(
             name=None, device_type=self.device_type, role=self.device_role, site=self.site,
         )
+        interface = Interface.objects.create(device=device, name='mgmt0', type='virtual')
+        ip = IPAddress.objects.create(address='10.99.99.1/32', assigned_object=interface)
+        device.primary_ip4 = ip
+        device.save()
         MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
         ComplianceResult.objects.create(
             device=device, measure=self.measure, status=ComplianceResultStatusChoices.PASS,

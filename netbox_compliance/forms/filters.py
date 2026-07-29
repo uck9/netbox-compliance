@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from dcim.models import Device, DeviceRole, Platform, Site, SiteGroup
 from extras.models import Tag
 from netbox.forms import NetBoxModelFilterSetForm
+from tenancy.models import Tenant
 from utilities.forms.fields import DynamicModelMultipleChoiceField, TagFilterField
 from utilities.forms.rendering import FieldSet
 from utilities.forms.widgets import DatePicker
@@ -135,11 +136,15 @@ class ComplianceExemptionFilterForm(NetBoxModelFilterSetForm):
     model = ComplianceExemption
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
-        FieldSet('measure_id', 'device_id', 'site_id', 'site_group_id', 'tag_id', name=_('Scope')),
+        FieldSet('measure_id', 'package_id', name=_('Measure or Package')),
+        FieldSet('device_id', 'site_id', 'site_group_id', 'tag_id', 'tenant_id', name=_('Scope')),
         FieldSet('active', 'valid_until__lt', name=_('Validity')),
     )
     measure_id = DynamicModelMultipleChoiceField(
         queryset=ComplianceMeasure.objects.all(), required=False, label=_('Measure'),
+    )
+    package_id = DynamicModelMultipleChoiceField(
+        queryset=CompliancePackage.objects.all(), required=False, label=_('Package'),
     )
     device_id = DynamicModelMultipleChoiceField(
         queryset=Device.objects.all(),
@@ -155,6 +160,9 @@ class ComplianceExemptionFilterForm(NetBoxModelFilterSetForm):
     )
     tag_id = DynamicModelMultipleChoiceField(
         queryset=Tag.objects.all(), required=False, label=_('Tag'),
+    )
+    tenant_id = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'),
     )
     active = forms.NullBooleanField(
         required=False,

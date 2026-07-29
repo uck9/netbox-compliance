@@ -7,23 +7,42 @@ from django.utils.translation import gettext_lazy as _
 
 from netbox.models import NetBoxModel
 
-from .measures import ComplianceMeasure
+from .measures import ComplianceMeasure, CompliancePackage
 
 __all__ = ('ComplianceExemption',)
 
-SCOPE_FIELDS = ('device', 'site', 'site_group', 'tag')
+SCOPE_FIELDS = ('device', 'site', 'site_group', 'tag', 'tenant')
 
 
 class ComplianceExemption(NetBoxModel):
     """
-    Removes a measure from a device's effective set, with an audit trail.
-    Exactly one of device/site/site_group/tag must be set.
+    Removes a measure -- or an entire package -- from a device's effective
+    set, with an audit trail. Exactly one of measure/package, and exactly
+    one of device/site/site_group/tag/tenant, must be set.
+
+    A package-level exemption is how you drop a whole CompliancePackage for
+    one device (or tenant/site/...) even when that package was assigned via
+    a broader scope the device doesn't otherwise control -- e.g. assigned by
+    platform (see PackageAssignment/devices_matching_assignment_scope), so
+    "everything by default, exclude by device" doesn't require restructuring
+    the assignment itself.
     """
     measure = models.ForeignKey(
         to=ComplianceMeasure,
         on_delete=models.CASCADE,
         related_name='exemptions',
+        null=True,
+        blank=True,
         verbose_name=_('measure'),
+    )
+    package = models.ForeignKey(
+        to=CompliancePackage,
+        on_delete=models.CASCADE,
+        related_name='exemptions',
+        null=True,
+        blank=True,
+        verbose_name=_('package'),
+        help_text=_('Exempt every measure in this package, instead of a single measure'),
     )
     device = models.ForeignKey(
         to='dcim.Device',
@@ -57,6 +76,14 @@ class ComplianceExemption(NetBoxModel):
         blank=True,
         verbose_name=_('tag'),
     )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.CASCADE,
+        related_name='compliance_exemptions',
+        null=True,
+        blank=True,
+        verbose_name=_('tenant'),
+    )
     justification = models.TextField(
         verbose_name=_('justification'),
     )
@@ -82,7 +109,8 @@ class ComplianceExemption(NetBoxModel):
         verbose_name_plural = _('compliance exemptions')
 
     def __str__(self):
-        return f'{self.measure} exemption ({self.scope})'
+        target = self.measure or self.package
+        return f'{target} exemption ({self.scope})'
 
     def get_absolute_url(self):
         return reverse('plugins:netbox_compliance:complianceexemption', args=[self.pk])
@@ -105,14 +133,20 @@ class ComplianceExemption(NetBoxModel):
 
     def clean(self):
         super().clean()
+        target_count = sum(bool(getattr(self, field)) for field in ('measure', 'package'))
+        if target_count == 0:
+            raise ValidationError(_('Exactly one of measure or package must be set.'))
+        if target_count > 1:
+            raise ValidationError(_('Only one of measure or package may be set.'))
+
         set_count = sum(bool(getattr(self, field)) for field in SCOPE_FIELDS)
         if set_count == 0:
             raise ValidationError(
-                _('Exactly one of device, site, site group, or tag must be set.')
+                _('Exactly one of device, site, site group, tag, or tenant must be set.')
             )
         if set_count > 1:
             raise ValidationError(
-                _('Only one of device, site, site group, or tag may be set.')
+                _('Only one of device, site, site group, tag, or tenant may be set.')
             )
         if self.valid_until and self.valid_until < self.valid_from:
             raise ValidationError(

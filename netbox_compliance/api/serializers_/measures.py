@@ -14,16 +14,18 @@ __all__ = (
 
 
 class ComplianceMeasureSerializer(NetBoxModelSerializer):
+    dropdown_label = serializers.CharField(read_only=True)
+
     class Meta:
         model = ComplianceMeasure
         fields = (
             'id', 'url', 'display', 'name', 'slug', 'title', 'description', 'category',
             'severity', 'max_result_age_days', 'status', 'comments', 'result_type',
             'pass_threshold', 'value_map', 'show_on_device_panel', 'panel_display_order',
-            'display_template', 'required_detail_keys', 'tags',
+            'display_template', 'required_detail_keys', 'tags', 'dropdown_label',
             'custom_fields', 'created', 'last_updated',
         )
-        brief_fields = ('id', 'url', 'display', 'name', 'slug', 'title')
+        brief_fields = ('id', 'url', 'display', 'name', 'slug', 'title', 'dropdown_label')
 
     def validate(self, data):
         data = super().validate(data)

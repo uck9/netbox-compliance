@@ -64,6 +64,39 @@ class ComplianceExemptionScopeTest(ComplianceTestMixin, TestCase):
         with self.assertRaises(ValidationError):
             exemption.full_clean()
 
+    def test_no_measure_or_package_is_invalid(self):
+        exemption = ComplianceExemption(justification='because', site=self.site)
+        with self.assertRaises(ValidationError):
+            exemption.full_clean()
+
+    def test_both_measure_and_package_is_invalid(self):
+        package = CompliancePackage.objects.create(name='Package1', slug='package1', status='active')
+        exemption = ComplianceExemption(measure=self.measure, package=package, justification='because', site=self.site)
+        with self.assertRaises(ValidationError):
+            exemption.full_clean()
+
+    def test_package_only_is_valid(self):
+        package = CompliancePackage.objects.create(name='Package1', slug='package1', status='active')
+        exemption = ComplianceExemption(package=package, justification='because', device=self.make_device())
+        exemption.full_clean()  # should not raise
+
+    def test_tenant_scope_is_valid(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        exemption = ComplianceExemption(measure=self.measure, justification='because', tenant=tenant)
+        exemption.full_clean()  # should not raise
+
+    def test_device_and_tenant_scope_is_invalid(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        exemption = ComplianceExemption(
+            measure=self.measure, justification='because', device=self.make_device(), tenant=tenant,
+        )
+        with self.assertRaises(ValidationError):
+            exemption.full_clean()
+
     def test_is_active_property(self):
         active = ComplianceExemption.objects.create(
             measure=self.measure, justification='because', site=self.site,

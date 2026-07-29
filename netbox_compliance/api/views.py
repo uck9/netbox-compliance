@@ -76,7 +76,9 @@ class MeasureAssignmentViewSet(NetBoxModelViewSet):
 
 
 class ComplianceExemptionViewSet(NetBoxModelViewSet):
-    queryset = ComplianceExemption.objects.select_related('measure', 'device', 'site', 'site_group', 'tag')
+    queryset = ComplianceExemption.objects.select_related(
+        'measure', 'package', 'device', 'site', 'site_group', 'tag', 'tenant',
+    )
     serializer_class = serializers.ComplianceExemptionSerializer
     filterset_class = filtersets.ComplianceExemptionFilterSet
 

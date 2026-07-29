@@ -13,8 +13,11 @@ from ..choices import (
     ComplianceMeasureSeverityChoices,
     ComplianceMeasureStatusChoices,
     CompliancePackageStatusChoices,
+    SEVERITY_SHORT_CODES,
     VALUE_MAP_COLORS,
 )
+
+DROPDOWN_LABEL_DESC_MAX_LENGTH = 80
 
 __all__ = (
     'ComplianceMeasure',
@@ -153,6 +156,35 @@ class ComplianceMeasure(NetBoxModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def short_description(self):
+        """First line of `title` (falling back to `description`), truncated -- a one-line
+        summary of what the measure actually checks, independent of its ID/severity. Used by
+        `dropdown_label` and directly by the Package 'Measures' tab's own short-description
+        column. Falls back to `description` when `title` is blank -- some legacy/orphaned
+        measures were never given one."""
+        raw = (self.title or self.description or '').strip()
+        text = raw.splitlines()[0] if raw else ''
+        if len(text) > DROPDOWN_LABEL_DESC_MAX_LENGTH:
+            text = text[:DROPDOWN_LABEL_DESC_MAX_LENGTH - 3] + '...'
+        return text
+
+    @property
+    def dropdown_label(self):
+        """'<name> - <severity code> - <short desc>' -- used by the ComplianceMeasure dropdown
+        on every measure-picker form (add-to-package, measure assignment, exemption, result), so
+        a measure can be identified by what it actually checks rather than just its ID.
+        Deliberately left off `__str__`/the API's `display` field: those are used everywhere a
+        measure is referenced (breadcrumbs, other tables, admin), where the bare ID is still the
+        right label -- this is a dropdown-specific presentation concern, not a change to how the
+        object identifies itself.
+        """
+        severity_code = SEVERITY_SHORT_CODES.get(self.severity, '?')
+        short_desc = self.short_description
+        if not short_desc:
+            return f'{self.name} - {severity_code}'
+        return f'{self.name} - {severity_code} - {short_desc}'
 
     def get_absolute_url(self):
         return reverse('plugins:netbox_compliance:compliancemeasure', args=[self.pk])

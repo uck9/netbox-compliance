@@ -4,9 +4,9 @@
 
 {% block content %}
   <style>
-    .compliance-passing-toggle td { cursor: pointer; }
-    .compliance-passing-toggle .mdi-chevron-right { transition: transform 0.15s ease-in-out; }
-    .compliance-passing-toggle[aria-expanded="true"] .mdi-chevron-right { transform: rotate(90deg); }
+    .compliance-collapse-toggle td { cursor: pointer; }
+    .compliance-collapse-toggle .mdi-chevron-right { transition: transform 0.15s ease-in-out; }
+    .compliance-collapse-toggle[aria-expanded="true"] .mdi-chevron-right { transform: rotate(90deg); }
   </style>
   {% for entry in packages %}
     <div class="row mb-3">
@@ -24,6 +24,7 @@
             <thead>
               <tr>
                 <th>Measure</th>
+                <th>Description</th>
                 <th>Severity</th>
                 <th>Weight</th>
                 <th>Required</th>
@@ -36,6 +37,7 @@
               {% for row in entry.failing_rows %}
                 <tr>
                   <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
+                  <td>{{ row.measure.short_description|placeholder }}</td>
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
                   <td>{{ row.weight }}</td>
                   <td>{% checkmark row.required %}</td>
@@ -53,37 +55,73 @@
                   </td>
                 </tr>
               {% endfor %}
-              {% if entry.passing_rows %}
-                <tr class="compliance-passing-toggle" data-bs-toggle="collapse" data-bs-target="#passing-{{ entry.package.slug }}" role="button" aria-expanded="false" aria-controls="passing-{{ entry.package.slug }}">
-                  <td colspan="7" class="text-secondary">
+            </tbody>
+            {% if entry.passing_rows %}
+              <tbody>
+                <tr class="compliance-collapse-toggle" data-bs-toggle="collapse" data-bs-target="#passing-{{ entry.package.slug }}" role="button" aria-expanded="false" aria-controls="passing-{{ entry.package.slug }}">
+                  <td colspan="8" class="text-secondary">
                     <i class="mdi mdi-chevron-right" aria-hidden="true"></i>
                     {% blocktrans count counter=entry.passing_count %}{{ counter }} passing measure (click to expand){% plural %}{{ counter }} passing measures (click to expand){% endblocktrans %}
                   </td>
                 </tr>
-              {% endif %}
-            </tbody>
-            <tbody class="collapse" id="passing-{{ entry.package.slug }}">
-              {% for row in entry.passing_rows %}
-                <tr>
-                  <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
-                  <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
-                  <td>{{ row.weight }}</td>
-                  <td>{% checkmark row.required %}</td>
-                  <td>{% badge row.display_label bg_color=row.display_color %}</td>
-                  <td>{{ row.value_display|placeholder }}</td>
-                  <td>
-                    {% if row.result %}
-                      {{ row.result.timestamp }}
-                      <a href="{{ row.result.get_absolute_url }}" title="{% trans "View result details" %}" data-bs-toggle="tooltip">
-                        <i class="mdi mdi-text-box-search-outline" aria-hidden="true"></i>
-                      </a>
-                    {% else %}
-                      {{ ''|placeholder }}
-                    {% endif %}
+              </tbody>
+              <tbody class="collapse" id="passing-{{ entry.package.slug }}">
+                {% for row in entry.passing_rows %}
+                  <tr>
+                    <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
+                    <td>{{ row.measure.short_description|placeholder }}</td>
+                    <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
+                    <td>{{ row.weight }}</td>
+                    <td>{% checkmark row.required %}</td>
+                    <td>{% badge row.display_label bg_color=row.display_color %}</td>
+                    <td>{{ row.value_display|placeholder }}</td>
+                    <td>
+                      {% if row.result %}
+                        {{ row.result.timestamp }}
+                        <a href="{{ row.result.get_absolute_url }}" title="{% trans "View result details" %}" data-bs-toggle="tooltip">
+                          <i class="mdi mdi-text-box-search-outline" aria-hidden="true"></i>
+                        </a>
+                      {% else %}
+                        {{ ''|placeholder }}
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            {% endif %}
+            {% if entry.not_applicable_rows %}
+              <tbody>
+                <tr class="compliance-collapse-toggle" data-bs-toggle="collapse" data-bs-target="#not-applicable-{{ entry.package.slug }}" role="button" aria-expanded="false" aria-controls="not-applicable-{{ entry.package.slug }}">
+                  <td colspan="8" class="text-secondary">
+                    <i class="mdi mdi-chevron-right" aria-hidden="true"></i>
+                    {% blocktrans count counter=entry.not_applicable_count %}{{ counter }} not applicable measure (click to expand){% plural %}{{ counter }} not applicable measures (click to expand){% endblocktrans %}
                   </td>
                 </tr>
-              {% endfor %}
-            </tbody>
+              </tbody>
+              <tbody class="collapse" id="not-applicable-{{ entry.package.slug }}">
+                {% for row in entry.not_applicable_rows %}
+                  <tr>
+                    <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
+                    <td>{{ row.measure.short_description|placeholder }}</td>
+                    <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
+                    <td>{{ row.weight }}</td>
+                    <td>{% checkmark row.required %}</td>
+                    <td>{% badge row.display_label bg_color=row.display_color %}</td>
+                    <td>{{ row.value_display|placeholder }}</td>
+                    <td>
+                      {% if row.result %}
+                        {{ row.result.timestamp }}
+                        <a href="{{ row.result.get_absolute_url }}" title="{% trans "View result details" %}" data-bs-toggle="tooltip">
+                          <i class="mdi mdi-text-box-search-outline" aria-hidden="true"></i>
+                        </a>
+                      {% else %}
+                        {{ ''|placeholder }}
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            {% endif %}
           </table>
         </div>
       </div>
@@ -99,6 +137,7 @@
             <thead>
               <tr>
                 <th>Measure</th>
+                <th>Description</th>
                 <th>Severity</th>
                 <th>Weight</th>
                 <th>Status</th>
@@ -110,6 +149,7 @@
               {% for row in direct_rows %}
                 <tr>
                   <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
+                  <td>{{ row.measure.short_description|placeholder }}</td>
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
                   <td>{{ row.weight }}</td>
                   <td>{% badge row.display_label bg_color=row.display_color %}</td>
@@ -148,7 +188,13 @@
             <tbody>
               {% for exemption in exemptions_applied %}
                 <tr>
-                  <td><a href="{{ exemption.measure.get_absolute_url }}">{{ exemption.measure.name }}</a></td>
+                  <td>
+                    {% if exemption.measure %}
+                      <a href="{{ exemption.measure.get_absolute_url }}">{{ exemption.measure.name }}</a>
+                    {% else %}
+                      <a href="{{ exemption.package.get_absolute_url }}">{{ exemption.package.name }}</a> (whole package)
+                    {% endif %}
+                  </td>
                   <td>{{ exemption.justification }}</td>
                 </tr>
               {% endfor %}

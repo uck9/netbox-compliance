@@ -5,6 +5,7 @@ from django.utils.translation import gettext_lazy as _
 from dcim.models import Device, DeviceRole, Platform, Site, SiteGroup
 from extras.models import Tag
 from netbox.filtersets import NetBoxModelFilterSet
+from tenancy.models import Tenant
 
 from .choices import (
     ComplianceMeasureCategoryChoices,
@@ -200,6 +201,13 @@ class ComplianceExemptionFilterSet(NetBoxModelFilterSet):
         field_name='measure__slug', queryset=ComplianceMeasure.objects.all(),
         to_field_name='slug', label=_('Measure (slug)'),
     )
+    package_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='package', queryset=CompliancePackage.objects.all(), label=_('Package (ID)'),
+    )
+    package = django_filters.ModelMultipleChoiceFilter(
+        field_name='package__slug', queryset=CompliancePackage.objects.all(),
+        to_field_name='slug', label=_('Package (slug)'),
+    )
     device_id = django_filters.ModelMultipleChoiceFilter(
         field_name='device', queryset=Device.objects.all(), label=_('Device (ID)'),
     )
@@ -227,6 +235,13 @@ class ComplianceExemptionFilterSet(NetBoxModelFilterSet):
     tag = django_filters.ModelMultipleChoiceFilter(
         field_name='tag__slug', queryset=Tag.objects.all(),
         to_field_name='slug', label=_('Tag (slug)'),
+    )
+    tenant_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='tenant', queryset=Tenant.objects.all(), label=_('Tenant (ID)'),
+    )
+    tenant = django_filters.ModelMultipleChoiceFilter(
+        field_name='tenant__slug', queryset=Tenant.objects.all(),
+        to_field_name='slug', label=_('Tenant (slug)'),
     )
     active = django_filters.BooleanFilter(method='filter_active', label=_('Currently active'))
     valid_until__lt = django_filters.DateFilter(field_name='valid_until', lookup_expr='lt')

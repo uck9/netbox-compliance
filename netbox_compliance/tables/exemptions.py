@@ -13,6 +13,7 @@ EXPIRING_SOON_DAYS = 30
 
 class ComplianceExemptionTable(NetBoxTable):
     measure = tables.Column(linkify=True)
+    package = tables.Column(linkify=True)
     device = tables.Column(linkify=True)
     site = tables.Column(linkify=True)
     site_group = tables.Column(linkify=True)
@@ -20,6 +21,7 @@ class ComplianceExemptionTable(NetBoxTable):
         template_code='{% if value %}<span class="badge" style="background-color: {{ value.color|default:"9e9e9e" }}">{{ value }}</span>{% endif %}',
         verbose_name='Tag',
     )
+    tenant = tables.Column(linkify=True)
     valid_from = columns.DateColumn()
     valid_until = columns.DateColumn()
     is_active = columns.BooleanColumn(verbose_name='Active')
@@ -28,12 +30,12 @@ class ComplianceExemptionTable(NetBoxTable):
     class Meta(NetBoxTable.Meta):
         model = ComplianceExemption
         fields = (
-            'pk', 'id', 'measure', 'device', 'site', 'site_group', 'tag',
+            'pk', 'id', 'measure', 'package', 'device', 'site', 'site_group', 'tag', 'tenant',
             'justification', 'approved_by', 'valid_from', 'valid_until', 'is_active',
             'tags', 'created', 'last_updated', 'actions',
         )
         default_columns = (
-            'pk', 'measure', 'device', 'site', 'site_group', 'tag',
+            'pk', 'measure', 'package', 'device', 'site', 'site_group', 'tag', 'tenant',
             'valid_from', 'valid_until', 'is_active',
         )
         row_attrs = {

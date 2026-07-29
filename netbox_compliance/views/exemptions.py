@@ -20,7 +20,9 @@ __all__ = (
 
 @register_model_view(models.ComplianceExemption, 'list', path='', detail=False)
 class ComplianceExemptionListView(ObjectListView):
-    queryset = models.ComplianceExemption.objects.select_related('measure', 'device', 'site', 'site_group', 'tag')
+    queryset = models.ComplianceExemption.objects.select_related(
+        'measure', 'package', 'device', 'site', 'site_group', 'tag', 'tenant',
+    )
     table = tables.ComplianceExemptionTable
     filterset = filtersets.ComplianceExemptionFilterSet
     filterset_form = forms.ComplianceExemptionFilterForm

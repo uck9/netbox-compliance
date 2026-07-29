@@ -20,7 +20,14 @@ from ..models import (
     PackageAssignment,
     PackageMeasure,
 )
-from ..services import get_effective_measures, score_device, score_group
+from ..services import (
+    devices_for_package,
+    devices_matching_assignment_scope,
+    devices_with_effective_measures,
+    get_effective_measures,
+    score_device,
+    score_group,
+)
 from .base import ComplianceTestMixin
 
 
@@ -130,6 +137,48 @@ class EffectiveMeasureResolutionTest(ComplianceTestMixin, TestCase):
 
         self.assertEqual(effective['direct'], [])
 
+    def test_package_level_exemption_via_device_drops_whole_package_from_platform_assignment(self):
+        """The motivating case: a package assigned broadly by platform (so every device with
+        that platform, or a child platform, gets it -- see test_package_measure_via_parent_platform_scope
+        above) needs to be excludable for one specific device without touching the assignment
+        itself. A package-level ComplianceExemption scoped to just that device does this."""
+        from dcim.models import Platform
+
+        child_platform = Platform.objects.create(name='ChildPlatform2', slug='child-platform-2', parent=self.platform)
+        device = self.make_device(platform=child_platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        ComplianceExemption.objects.create(package=self.package, device=device, justification='opted out')
+
+        effective = get_effective_measures(device)
+
+        self.assertEqual(effective['packages'], {})
+        self.assertEqual(len(effective['exemptions_applied']), 1)
+        self.assertEqual(effective['exemptions_applied'][0].package, self.package)
+
+    def test_package_level_exemption_does_not_affect_other_devices(self):
+        from dcim.models import Platform
+
+        child_platform = Platform.objects.create(name='ChildPlatform3', slug='child-platform-3', parent=self.platform)
+        exempted_device = self.make_device(platform=child_platform)
+        other_device = self.make_device(platform=child_platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        ComplianceExemption.objects.create(package=self.package, device=exempted_device, justification='opted out')
+
+        self.assertEqual(get_effective_measures(exempted_device)['packages'], {})
+        self.assertIn(self.package, get_effective_measures(other_device)['packages'])
+
+    def test_tenant_scoped_exemption(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        device = self.make_device(tenant=tenant)
+        MeasureAssignment.objects.create(device=device, measure=self.measure2, weight=1)
+        ComplianceExemption.objects.create(measure=self.measure2, tenant=tenant, justification='tenant waiver')
+
+        effective = get_effective_measures(device)
+
+        self.assertEqual(effective['direct'], [])
+
 
 class StalenessTest(ComplianceTestMixin, TestCase):
     def test_no_result_is_pending(self):
@@ -218,3 +267,226 @@ class ScoringTest(ComplianceTestMixin, TestCase):
         score, weight = score_group([])
         self.assertEqual(score, Decimal('100.00'))
         self.assertEqual(weight, 0)
+
+
+class AssignmentScopeDeviceResolutionTest(ComplianceTestMixin, TestCase):
+    """Reverse direction of test_package_measure_via_parent_platform_scope above (device ->
+    assignment): given an assignment, which devices does it resolve to. Regression coverage for
+    a real bug where the CompliancePackage detail view's device count (and, before the shared
+    `devices_matching_assignment_scope` helper existed, `devices_with_effective_measures` had
+    its own separately-written copy of this logic) matched a platform-scoped assignment against
+    only devices with that *exact* platform, silently excluding every child platform -- e.g. a
+    package assigned to the parent 'IOS XE' platform showing ~26 matched devices instead of the
+    ~3400 real IOS XE devices, since almost none of them use the bare parent platform directly."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        from dcim.models import Platform
+
+        cls.child_platform = Platform.objects.create(name='ChildPlatform', slug='child-platform', parent=cls.platform)
+        cls.package = CompliancePackage.objects.create(
+            name='Package1', slug='package1', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+
+    def test_platform_scope_matches_child_platform_devices(self):
+        parent_device = self.make_device(platform=self.platform)
+        child_device = self.make_device(platform=self.child_platform)
+        other_device = self.make_device()  # no platform at all -- must not match
+        assignment = PackageAssignment.objects.create(package=self.package, platform=self.platform)
+
+        matched_ids = set(devices_matching_assignment_scope(assignment).values_list('pk', flat=True))
+
+        self.assertEqual(matched_ids, {parent_device.pk, child_device.pk})
+        self.assertNotIn(other_device.pk, matched_ids)
+
+    def test_devices_with_effective_measures_includes_child_platform_devices(self):
+        child_device = self.make_device(platform=self.child_platform)
+        make_measure('measure-scope')  # unused directly; package needs no measures to matter here
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+
+        result_ids = set(devices_with_effective_measures().values_list('pk', flat=True))
+
+        self.assertIn(child_device.pk, result_ids)
+
+    def test_devices_for_package_unions_multiple_assignments_and_includes_child_platforms(self):
+        platform_device = self.make_device(platform=self.child_platform)
+        role_device = self.make_device(role=self.device_role2)
+        unrelated_device = self.make_device()
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        PackageAssignment.objects.create(package=self.package, device_role=self.device_role2)
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertEqual(result_ids, {platform_device.pk, role_device.pk})
+        self.assertNotIn(unrelated_device.pk, result_ids)
+
+    def test_devices_for_package_excludes_device_level_package_exemption(self):
+        device = self.make_device(platform=self.child_platform)
+        other_device = self.make_device(platform=self.child_platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        ComplianceExemption.objects.create(package=self.package, device=device, justification='opted out')
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertNotIn(device.pk, result_ids)
+        self.assertIn(other_device.pk, result_ids)
+
+    def test_devices_for_package_excludes_tenant_level_package_exemption(self):
+        """The reported bug: excluding a package by tenant left the device still showing up in
+        the Devices tab, because devices_for_package originally ignored exemptions entirely."""
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='ExcludedTenant', slug='excluded-tenant')
+        tenant_device = self.make_device(platform=self.child_platform, tenant=tenant)
+        other_device = self.make_device(platform=self.child_platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        ComplianceExemption.objects.create(package=self.package, tenant=tenant, justification='tenant opted out')
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertNotIn(tenant_device.pk, result_ids)
+        self.assertIn(other_device.pk, result_ids)
+
+    def test_devices_for_package_ignores_expired_exemption(self):
+        from datetime import date, timedelta as td
+
+        device = self.make_device(platform=self.child_platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        ComplianceExemption.objects.create(
+            package=self.package, device=device, justification='expired',
+            valid_from=date.today() - td(days=30), valid_until=date.today() - td(days=1),
+        )
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertIn(device.pk, result_ids)
+
+    def test_devices_for_package_ignores_measure_level_exemption(self):
+        """Documented limitation: a measure-level (not package-level) exemption doesn't remove
+        the device from scope here, even if it happens to cover every measure in the package --
+        devices_for_package only reacts to package-level exemptions."""
+        measure = make_measure('package-scope-measure')
+        device = self.make_device(platform=self.child_platform)
+        PackageMeasure.objects.create(package=self.package, measure=measure, weight=1, required=True)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        ComplianceExemption.objects.create(measure=measure, device=device, justification='measure-level only')
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertIn(device.pk, result_ids)
+
+
+class DeviceEligibilityTest(ComplianceTestMixin, TestCase):
+    """Stack members and unreachable devices: compliance is tracked against a Virtual Chassis's
+    single master member, not every physical unit, and a device with no primary IP at all can
+    never produce real collector results. `is_device_eligible_for_compliance` (single device) and
+    `eligible_devices_qs` (bulk) implement this, wired into both `get_effective_measures` (so a
+    non-master member's own compliance tab is empty too, not just hidden from lists) and
+    `devices_matching_assignment_scope` (so package scope/device-count/Devices-tab lists agree)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.measure = make_measure('eligibility-measure')
+        cls.package = CompliancePackage.objects.create(
+            name='EligPkg', slug='eligpkg', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+        PackageMeasure.objects.create(package=cls.package, measure=cls.measure, weight=1, required=True)
+
+    def _make_vc(self, name='VC1'):
+        from dcim.models import VirtualChassis
+
+        return VirtualChassis.objects.create(name=name)
+
+    def test_device_with_no_primary_ip_has_no_effective_measures(self):
+        device = self.make_device(primary_ip=False, site=self.site)
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+
+        effective = get_effective_measures(device)
+
+        self.assertEqual(effective['direct'], [])
+        self.assertEqual(effective['packages'], {})
+
+    def test_device_with_no_primary_ip_excluded_from_package_scope(self):
+        device = self.make_device(primary_ip=False, platform=self.platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertNotIn(device.pk, result_ids)
+
+    def test_non_master_vc_member_has_no_effective_measures(self):
+        vc = self._make_vc()
+        master = self.make_device(name='master-device')
+        member = self.make_device(name='member-device')
+        master.virtual_chassis = vc
+        master.vc_position = 1
+        master.save()
+        member.virtual_chassis = vc
+        member.vc_position = 2
+        member.save()
+        vc.master = master
+        vc.save()
+        MeasureAssignment.objects.create(device=member, measure=self.measure, weight=1)
+
+        self.assertEqual(get_effective_measures(member)['direct'], [])
+
+    def test_vc_master_still_has_effective_measures(self):
+        vc = self._make_vc()
+        master = self.make_device(name='master-device2')
+        master.virtual_chassis = vc
+        master.vc_position = 1
+        master.save()
+        vc.master = master
+        vc.save()
+        MeasureAssignment.objects.create(device=master, measure=self.measure, weight=1)
+
+        self.assertEqual(len(get_effective_measures(master)['direct']), 1)
+
+    def test_non_master_vc_member_excluded_from_package_scope_master_included(self):
+        vc = self._make_vc()
+        master = self.make_device(name='master-device3', platform=self.platform)
+        member = self.make_device(name='member-device3', platform=self.platform)
+        master.virtual_chassis = vc
+        master.vc_position = 1
+        master.save()
+        member.virtual_chassis = vc
+        member.vc_position = 2
+        member.save()
+        vc.master = master
+        vc.save()
+        PackageAssignment.objects.create(package=self.package, platform=self.platform)
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertIn(master.pk, result_ids)
+        self.assertNotIn(member.pk, result_ids)
+
+    def test_vc_with_no_master_designated_fails_open_all_members_eligible(self):
+        """Explicit product decision: an unconfigured stack (no master set yet) must not silently
+        vanish from compliance coverage -- every member stays individually eligible until someone
+        designates a master, rather than the whole stack going dark."""
+        vc = self._make_vc()
+        member1 = self.make_device(name='nomaster-member1')
+        member2 = self.make_device(name='nomaster-member2')
+        member1.virtual_chassis = vc
+        member1.vc_position = 1
+        member1.save()
+        member2.virtual_chassis = vc
+        member2.vc_position = 2
+        member2.save()
+        MeasureAssignment.objects.create(device=member1, measure=self.measure, weight=1)
+        MeasureAssignment.objects.create(device=member2, measure=self.measure, weight=1)
+
+        self.assertEqual(len(get_effective_measures(member1)['direct']), 1)
+        self.assertEqual(len(get_effective_measures(member2)['direct']), 1)
+
+    def test_device_with_no_vc_at_all_is_unaffected(self):
+        """The firewall-HA-pair case: devices with no Virtual Chassis membership at all have no
+        'master' concept to apply, so each one is independently eligible on its own -- same as
+        every other test in this file relies on via make_device()'s default primary_ip=True."""
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+
+        self.assertEqual(len(get_effective_measures(device)['direct']), 1)

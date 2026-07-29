@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from dcim.models import Device, DeviceRole, Platform, Site, SiteGroup
 from extras.models import Tag
 from netbox.forms import NetBoxModelForm
+from tenancy.models import Tenant
 from utilities.forms.fields import (
     CommentField,
     DynamicModelChoiceField,
@@ -35,6 +36,13 @@ __all__ = (
     'ComplianceExemptionForm',
     'ComplianceResultForm',
 )
+
+# Shows "<name> - <severity code> - <short desc>" instead of just the bare name in every
+# ComplianceMeasure dropdown -- see ComplianceMeasure.dropdown_label. Passed to every `measure`
+# DynamicModelChoiceField below via `context={'label': ...}`, which overrides the widget's
+# default 'display' attribute lookup for just this one field, without touching the model's
+# `__str__`/API `display` (used everywhere else a measure is referenced).
+MEASURE_DROPDOWN_CONTEXT = {'label': 'dropdown_label'}
 
 
 class ComplianceMeasureForm(NetBoxModelForm):
@@ -87,7 +95,7 @@ class CompliancePackageForm(NetBoxModelForm):
 
 class PackageMeasureForm(NetBoxModelForm):
     package = DynamicModelChoiceField(queryset=CompliancePackage.objects.all())
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all(), context=MEASURE_DROPDOWN_CONTEXT)
 
     fieldsets = (
         FieldSet('package', 'measure', 'weight', 'required', 'display_order', 'tags', name=_('Package Measure')),
@@ -163,7 +171,7 @@ class PackageAssignmentBulkAssignForm(forms.Form):
 
 class MeasureAssignmentForm(NetBoxModelForm):
     device = DynamicModelChoiceField(queryset=Device.objects.all(), selector=True, label=_('Device'))
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all(), context=MEASURE_DROPDOWN_CONTEXT)
 
     fieldsets = (
         FieldSet('device', 'measure', 'weight', 'description', 'tags', name=_('Measure Assignment')),
@@ -175,22 +183,32 @@ class MeasureAssignmentForm(NetBoxModelForm):
 
 
 class ComplianceExemptionForm(NetBoxModelForm):
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(
+        queryset=ComplianceMeasure.objects.all(), required=False, context=MEASURE_DROPDOWN_CONTEXT,
+        help_text=_('Exempt one measure. Leave blank if exempting a whole package instead.'),
+    )
+    package = DynamicModelChoiceField(
+        queryset=CompliancePackage.objects.all(), required=False,
+        help_text=_('Exempt every measure in this package for the scope below, regardless of how the '
+                    'package itself got assigned (direct, role, site, platform, ...). Leave blank if '
+                    'exempting a single measure instead.'),
+    )
     device = DynamicModelChoiceField(queryset=Device.objects.all(), required=False, selector=True, label=_('Device'))
     site = DynamicModelChoiceField(queryset=Site.objects.all(), required=False, selector=True, label=_('Site'))
     site_group = DynamicModelChoiceField(queryset=SiteGroup.objects.all(), required=False, label=_('Site Group'))
     tag = DynamicModelChoiceField(queryset=Tag.objects.all(), required=False, label=_('Tag'))
+    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'))
 
     fieldsets = (
-        FieldSet('measure', name=_('Measure')),
-        FieldSet('device', 'site', 'site_group', 'tag', name=_('Scope (exactly one)')),
+        FieldSet('measure', 'package', name=_('Measure or Package (exactly one)')),
+        FieldSet('device', 'site', 'site_group', 'tag', 'tenant', name=_('Scope (exactly one)')),
         FieldSet('justification', 'approved_by', 'valid_from', 'valid_until', 'tags', name=_('Approval')),
     )
 
     class Meta:
         model = ComplianceExemption
         fields = (
-            'measure', 'device', 'site', 'site_group', 'tag',
+            'measure', 'package', 'device', 'site', 'site_group', 'tag', 'tenant',
             'justification', 'approved_by', 'valid_from', 'valid_until', 'tags',
         )
         widgets = {
@@ -202,7 +220,7 @@ class ComplianceExemptionForm(NetBoxModelForm):
 
 class ComplianceResultForm(NetBoxModelForm):
     device = DynamicModelChoiceField(queryset=Device.objects.all(), selector=True, label=_('Device'))
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all(), context=MEASURE_DROPDOWN_CONTEXT)
     details = JSONField(required=False)
 
     fieldsets = (

@@ -35,6 +35,12 @@ class ComplianceMeasureSeverityChoices(ChoiceSet):
     ]
 
 
+# Single-character codes (first letter of each label) for compact display, e.g. the
+# ComplianceMeasure dropdown label -- derived from CHOICES rather than hardcoded so it can't
+# drift out of sync if a severity's label ever changes.
+SEVERITY_SHORT_CODES = {value: label[0].upper() for value, label, *_rest in ComplianceMeasureSeverityChoices.CHOICES}
+
+
 class ComplianceMeasureResultTypeChoices(ChoiceSet):
     key = 'ComplianceMeasure.result_type'
 

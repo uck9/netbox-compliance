@@ -37,7 +37,11 @@ class DeviceComplianceTabView(generic.ObjectView):
             for row in rows:
                 row.value_display = services.render_display_template(row)
             passing_rows = [row for row in rows if row.status == EffectiveStatusChoices.PASS]
-            failing_rows = [row for row in rows if row.status != EffectiveStatusChoices.PASS]
+            not_applicable_rows = [row for row in rows if row.status == EffectiveStatusChoices.NOT_APPLICABLE]
+            failing_rows = [
+                row for row in rows
+                if row.status not in (EffectiveStatusChoices.PASS, EffectiveStatusChoices.NOT_APPLICABLE)
+            ]
             packages.append({
                 'package': package,
                 'score': scoring['package_scores'][package],
@@ -45,8 +49,10 @@ class DeviceComplianceTabView(generic.ObjectView):
                 'rows': rows,
                 'passing_rows': passing_rows,
                 'failing_rows': failing_rows,
+                'not_applicable_rows': not_applicable_rows,
                 'passing_count': len(passing_rows),
                 'failing_count': len(failing_rows),
+                'not_applicable_count': len(not_applicable_rows),
             })
 
         direct_rows = sorted(effective['direct'], key=lambda r: r.measure.name)

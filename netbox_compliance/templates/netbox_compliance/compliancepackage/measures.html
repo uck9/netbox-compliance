@@ -5,7 +5,7 @@
 
 {% block extra_controls %}
   {% if perms.netbox_compliance.add_packagemeasure %}
-    <a href="{% url 'plugins:netbox_compliance:packagemeasure_add' %}?package={{ object.pk }}"
+    <a href="{% url 'plugins:netbox_compliance:packagemeasure_add' %}?package={{ object.pk }}&return_url={% url 'plugins:netbox_compliance:compliancepackage_measures' pk=object.pk %}"
       class="btn btn-primary">
       <span class="mdi mdi-plus-thick" aria-hidden="true"></span> Add Measure
     </a>
