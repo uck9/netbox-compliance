@@ -106,18 +106,26 @@ class ValidateSoftwareVersionResultsTest(ComplianceTestMixin, TestCase):
         self.assertNotIn('Wrote', output)
         self.assertEqual(ComplianceResult.objects.filter(device=device, measure=self.measure).count(), 1)
 
-    def test_only_latest_result_per_device_is_checked(self):
+    def test_reposting_a_result_updates_the_row_the_command_checks(self):
+        """ComplianceResult holds one row per (device, measure) -- a repost (e.g. via
+        record_result(), the same path evaluate_software_version/the bulk API use)
+        updates that row in place, so the command always sees the latest state without
+        needing a distinct-per-device query."""
+        from ..services import record_result
+
         device = self.make_device(platform=self.platform)
         Device.objects.filter(pk=device.pk).update(custom_field_data={'software_version': '17.12.3'})
-        ComplianceResult.objects.create(
-            device=device, measure=self.measure, status='fail', value='required_upgrade',
+        record_result(
+            device, self.measure, status='fail', value='required_upgrade',
             details={'running': '1.0.0', 'target': 'nonsense'}, timestamp=timezone.now() - timezone.timedelta(days=1),
             source='test',
         )
-        ComplianceResult.objects.create(
-            device=device, measure=self.measure, status='pass', value='target_active_version',
+        record_result(
+            device, self.measure, status='pass', value='target_active_version',
             details={'running': '17.12.3', 'target': '17.12.3'}, timestamp=timezone.now(), source='test',
         )
+
+        self.assertEqual(ComplianceResult.objects.filter(device=device, measure=self.measure).count(), 1)
 
         output = self._call()
 

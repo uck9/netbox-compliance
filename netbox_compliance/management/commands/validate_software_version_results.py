@@ -33,17 +33,18 @@ class Command(BaseCommand):
         if measure is None:
             raise CommandError(f"No ComplianceMeasure with slug {SOFTWARE_VERSION_MEASURE_SLUG!r} exists.")
 
-        latest_results = (
+        # ComplianceResult now holds at most one row per (device, measure)
+        # (unique constraint) -- this is already "the latest", no
+        # distinct-on-device query needed.
+        results = (
             ComplianceResult.objects
             .filter(measure=measure)
             .select_related('device', 'device__platform', 'device__role', 'device__device_type')
-            .order_by('device_id', '-timestamp')
-            .distinct('device_id')
         )
 
         checked = 0
         mismatches = []
-        for result in latest_results:
+        for result in results:
             checked += 1
             device = result.device
             if device is None:

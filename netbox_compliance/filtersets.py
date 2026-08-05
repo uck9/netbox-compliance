@@ -19,6 +19,7 @@ from .models import (
     ComplianceMeasure,
     CompliancePackage,
     ComplianceResult,
+    ComplianceResultHistory,
     ComplianceSnapshot,
     MeasureAssignment,
     PackageAssignment,
@@ -33,6 +34,7 @@ __all__ = (
     'MeasureAssignmentFilterSet',
     'ComplianceExemptionFilterSet',
     'ComplianceResultFilterSet',
+    'ComplianceResultHistoryFilterSet',
     'ComplianceSnapshotFilterSet',
 )
 
@@ -264,6 +266,12 @@ class ComplianceExemptionFilterSet(NetBoxModelFilterSet):
 
 
 class ComplianceResultFilterSet(NetBoxModelFilterSet):
+    """
+    ComplianceResult holds at most one row per (device, measure) -- the
+    unique constraint means the plain queryset here is already "latest",
+    no distinct-on-device/measure post-filtering needed. For full history,
+    see ComplianceResultHistoryFilterSet below.
+    """
     device_id = django_filters.ModelMultipleChoiceFilter(
         field_name='device', queryset=Device.objects.all(), label=_('Device (ID)'),
     )
@@ -280,10 +288,6 @@ class ComplianceResultFilterSet(NetBoxModelFilterSet):
     )
     status = django_filters.MultipleChoiceFilter(choices=ComplianceResultStatusChoices)
     timestamp = django_filters.DateTimeFromToRangeFilter()
-    history = django_filters.BooleanFilter(
-        method='filter_noop',
-        label=_('Return full result history instead of just the latest result per device/measure'),
-    )
 
     class Meta:
         model = ComplianceResult
@@ -294,23 +298,36 @@ class ComplianceResultFilterSet(NetBoxModelFilterSet):
             return queryset
         return queryset.filter(Q(source__icontains=value) | Q(device__name__icontains=value))
 
-    def filter_noop(self, queryset, name, value):
-        # Actual behavior lives in filter_queryset() below -- `history` needs
-        # to affect the result set even when the param is entirely absent,
-        # which a per-field method filter can't do (django-filter skips
-        # calling it when the value is empty/unspecified).
-        return queryset
 
-    def filter_queryset(self, queryset):
-        queryset = super().filter_queryset(queryset)
-        if self.form.cleaned_data.get('history'):
+class ComplianceResultHistoryFilterSet(NetBoxModelFilterSet):
+    """Every observation ever recorded for a (device, measure) pair -- see ComplianceResultHistory."""
+    device_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='device', queryset=Device.objects.all(), label=_('Device (ID)'),
+    )
+    device = django_filters.ModelMultipleChoiceFilter(
+        field_name='device__name', queryset=Device.objects.all(),
+        to_field_name='name', label=_('Device (name)'),
+    )
+    measure_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='measure', queryset=ComplianceMeasure.objects.all(), label=_('Measure (ID)'),
+    )
+    measure = django_filters.ModelMultipleChoiceFilter(
+        field_name='measure__slug', queryset=ComplianceMeasure.objects.all(),
+        to_field_name='slug', label=_('Measure (slug)'),
+    )
+    status = django_filters.MultipleChoiceFilter(choices=ComplianceResultStatusChoices)
+    timestamp = django_filters.DateTimeFromToRangeFilter()
+
+    class Meta:
+        model = ComplianceResultHistory
+        fields = ('id', 'source', 'device_name', 'measure_slug')
+
+    def search(self, queryset, name, value):
+        if not value.strip():
             return queryset
-        latest_pks = (
-            queryset.order_by('device_id', 'measure_id', '-timestamp')
-            .distinct('device_id', 'measure_id')
-            .values_list('pk', flat=True)
+        return queryset.filter(
+            Q(source__icontains=value) | Q(device_name__icontains=value) | Q(measure_slug__icontains=value)
         )
-        return queryset.filter(pk__in=list(latest_pks))
 
 
 class ComplianceSnapshotFilterSet(NetBoxModelFilterSet):

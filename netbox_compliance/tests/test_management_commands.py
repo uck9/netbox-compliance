@@ -1,11 +1,14 @@
+from datetime import date, timedelta
 from io import StringIO
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 
 from ..choices import ComplianceMeasureCategoryChoices, ComplianceMeasureResultTypeChoices, ComplianceMeasureSeverityChoices
-from ..models import ComplianceMeasure, ComplianceResult
+from ..models import ComplianceMeasure, ComplianceResult, ComplianceResultHistory, ComplianceSnapshot
+from ..services import record_result
 from .base import ComplianceTestMixin
 
 VALUE_MAP = {
@@ -87,3 +90,93 @@ class ImportResultsFromCustomFieldsTest(ComplianceTestMixin, TestCase):
         )
         with self.assertRaises(CommandError):
             self._call(measure='bool-measure', value_cf='sw_state', detail_cf=[])
+
+
+class PruneComplianceResultsTest(ComplianceTestMixin, TestCase):
+    """prune_compliance_results only ever prunes ComplianceResultHistory (the growing
+    log) -- ComplianceResult itself (one row per device/measure, kept current in
+    place) has nothing there to prune by age."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.measure = ComplianceMeasure.objects.create(
+            name='prune-measure', slug='prune-measure',
+            category=ComplianceMeasureCategoryChoices.OPERATIONAL,
+            severity=ComplianceMeasureSeverityChoices.LOW,
+        )
+
+    def _call(self, *args, **kwargs):
+        out = StringIO()
+        kwargs.setdefault('stdout', out)
+        call_command('prune_compliance_results', *args, **kwargs)
+        return out.getvalue()
+
+    def test_old_history_not_covered_by_a_snapshot_is_kept(self):
+        device = self.make_device()
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        ComplianceResultHistory.objects.all().update(timestamp=timezone.now() - timedelta(days=200))
+
+        output = self._call('--keep-days', '90')
+
+        self.assertIn('Deleted 0', output)
+        self.assertEqual(ComplianceResultHistory.objects.count(), 1)
+
+    def test_old_history_covered_by_a_snapshot_is_pruned(self):
+        device = self.make_device()
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        old_timestamp = timezone.now() - timedelta(days=200)
+        ComplianceResultHistory.objects.all().update(timestamp=old_timestamp)
+        ComplianceSnapshot.objects.create(
+            device=device, device_name=device.name, period=date(old_timestamp.year, old_timestamp.month, 1),
+            overall_score=100, compliant=True, data={},
+        )
+
+        output = self._call('--keep-days', '90')
+
+        self.assertIn('Deleted 1', output)
+        self.assertEqual(ComplianceResultHistory.objects.count(), 0)
+
+    def test_dry_run_deletes_nothing(self):
+        device = self.make_device()
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        old_timestamp = timezone.now() - timedelta(days=200)
+        ComplianceResultHistory.objects.all().update(timestamp=old_timestamp)
+        ComplianceSnapshot.objects.create(
+            device=device, device_name=device.name, period=date(old_timestamp.year, old_timestamp.month, 1),
+            overall_score=100, compliant=True, data={},
+        )
+
+        output = self._call('--keep-days', '90', '--dry-run')
+
+        self.assertIn('Would delete 1', output)
+        self.assertEqual(ComplianceResultHistory.objects.count(), 1)
+
+    def test_orphaned_history_for_a_deleted_device_is_pruned_by_age_alone(self):
+        device = self.make_device()
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        ComplianceResultHistory.objects.all().update(timestamp=timezone.now() - timedelta(days=200))
+        device.delete()  # ComplianceResultHistory.device is SET_NULL -- row survives with device_id=None
+
+        entry = ComplianceResultHistory.objects.get()
+        self.assertIsNone(entry.device_id)
+
+        output = self._call('--keep-days', '90')
+
+        self.assertIn('Deleted 1', output)
+        self.assertEqual(ComplianceResultHistory.objects.count(), 0)
+
+    def test_complianceresult_itself_is_never_touched(self):
+        device = self.make_device()
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        ComplianceResult.objects.all().update(timestamp=timezone.now() - timedelta(days=200))
+        ComplianceResultHistory.objects.all().update(timestamp=timezone.now() - timedelta(days=200))
+        old_timestamp = timezone.now() - timedelta(days=200)
+        ComplianceSnapshot.objects.create(
+            device=device, device_name=device.name, period=date(old_timestamp.year, old_timestamp.month, 1),
+            overall_score=100, compliant=True, data={},
+        )
+
+        self._call('--keep-days', '90')
+
+        self.assertEqual(ComplianceResult.objects.count(), 1)

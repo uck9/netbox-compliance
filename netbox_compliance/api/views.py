@@ -16,13 +16,15 @@ from ..models import (
     ComplianceMeasure,
     CompliancePackage,
     ComplianceResult,
+    ComplianceResultHistory,
     ComplianceSnapshot,
     MeasureAssignment,
     PackageAssignment,
     PackageMeasure,
 )
 from ..services import (
-    build_snapshot_data, effective_measure_definitions, enum_credit_status, get_effective_measures, score_device,
+    build_snapshot_data, effective_measure_definitions, enum_credit_status, get_effective_measures,
+    record_result, score_device,
 )
 from . import serializers
 from .. import filtersets
@@ -35,6 +37,7 @@ __all__ = (
     'MeasureAssignmentViewSet',
     'ComplianceExemptionViewSet',
     'ComplianceResultViewSet',
+    'ComplianceResultHistoryViewSet',
     'ComplianceSnapshotViewSet',
     'BulkResultIngestView',
     'DeviceComplianceStatusView',
@@ -87,6 +90,15 @@ class ComplianceResultViewSet(NetBoxModelViewSet):
     queryset = ComplianceResult.objects.select_related('device', 'measure')
     serializer_class = serializers.ComplianceResultSerializer
     filterset_class = filtersets.ComplianceResultFilterSet
+
+
+class ComplianceResultHistoryViewSet(NetBoxModelViewSet):
+    """Read-only + delete: entries are appended automatically (post_save signal, see __init__.py),
+    never created/edited directly via the API -- write a ComplianceResult instead."""
+    queryset = ComplianceResultHistory.objects.select_related('device', 'measure')
+    serializer_class = serializers.ComplianceResultHistorySerializer
+    filterset_class = filtersets.ComplianceResultHistoryFilterSet
+    http_method_names = ['get', 'delete', 'head', 'options']
 
 
 class ComplianceSnapshotViewSet(NetBoxModelViewSet):
@@ -282,17 +294,14 @@ class BulkResultIngestView(APIView):
                             f"{device}: measure '{item['measure'].slug}' is not currently in this "
                             f"device's effective measure set"
                         )
-                    create_kwargs = {
-                        'device': device,
-                        'measure': item['measure'],
-                        'status': item['status'],
-                        'value': item['value'],
-                        'details': item['details'],
-                        'source': batch['source'],
-                    }
-                    if item['timestamp'] is not None:
-                        create_kwargs['timestamp'] = item['timestamp']
-                    ComplianceResult.objects.create(**create_kwargs)
+                    # record_result() upserts -- a repost for a (device, measure)
+                    # pair already seen updates that row in place rather than
+                    # erroring on the unique constraint; ComplianceResultHistory
+                    # still gets an entry either way (post_save signal).
+                    record_result(
+                        device, item['measure'], status=item['status'], value=item['value'],
+                        details=item['details'], source=batch['source'], timestamp=item['timestamp'],
+                    )
                     created += 1
 
         return Response({'created': created, 'warnings': warnings}, status=status.HTTP_201_CREATED)

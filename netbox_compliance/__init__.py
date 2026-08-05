@@ -8,6 +8,30 @@ def _invalidate_device_panel_cache_on_result_change(sender, instance, **kwargs):
     invalidate_device_panel_cache(instance.device_id)
 
 
+def _log_result_history_on_save(sender, instance, **kwargs):
+    """
+    Mirror every ComplianceResult save into an immutable ComplianceResultHistory
+    row. A signal (not something baked into record_result()) so this can't be
+    bypassed by whichever path did the write -- record_result()'s upsert, the
+    plain REST viewset/admin form (manual corrections), or any future direct
+    .save() -- all of them call Model.save() eventually, this is the one place
+    that's guaranteed to see it.
+    """
+    from .models import ComplianceResultHistory
+
+    ComplianceResultHistory.objects.create(
+        device_id=instance.device_id,
+        device_name=str(instance.device) if instance.device_id else '',
+        measure_id=instance.measure_id,
+        measure_slug=instance.measure.slug if instance.measure_id else '',
+        status=instance.status,
+        value=instance.value,
+        details=instance.details,
+        source=instance.source,
+        timestamp=instance.timestamp,
+    )
+
+
 class NetBoxComplianceConfig(PluginConfig):
     name = 'netbox_compliance'
     verbose_name = 'NetBox Compliance'
@@ -93,6 +117,28 @@ class NetBoxComplianceConfig(PluginConfig):
             dispatch_uid='compliance_result_panel_cache_invalidate_delete',
         )
 
+    def register_result_history_logging(self) -> None:
+        """
+        Append a ComplianceResultHistory row every time a ComplianceResult is
+        saved -- covers record_result()'s upsert (bulk ingest, the
+        software-version signal, the custom-field import command) and manual
+        admin edits via the plain viewset/form uniformly, same rationale as
+        register_result_cache_invalidation above. Not post_delete: deleting
+        the current-state row doesn't erase what was observed, so history is
+        never touched by a ComplianceResult delete.
+
+        Same weak-reference caveat as the other signals in this file:
+        receivers must be module-level functions.
+        """
+        from django.db.models.signals import post_save
+
+        from .models import ComplianceResult
+
+        post_save.connect(
+            _log_result_history_on_save, sender=ComplianceResult,
+            dispatch_uid='compliance_result_history_log_save',
+        )
+
     def ready(self):
         super().ready()
         from . import dashboard, jobs  # noqa: F401
@@ -100,6 +146,7 @@ class NetBoxComplianceConfig(PluginConfig):
         self.register_device_compliance_tab()
         self.register_software_version_evaluation()
         self.register_result_cache_invalidation()
+        self.register_result_history_logging()
 
 
 config = NetBoxComplianceConfig

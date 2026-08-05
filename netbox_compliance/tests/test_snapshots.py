@@ -40,9 +40,10 @@ class SnapshotIdempotencyTest(ComplianceTestMixin, TestCase):
         first_id = ComplianceSnapshot.objects.get(period=period).pk
 
         # Change the underlying data, then regenerate -- should replace, not duplicate.
-        ComplianceResult.objects.create(
-            device=device, measure=self.measure, status=ComplianceResultStatusChoices.FAIL,
-            timestamp=timezone.now(), source='test',
+        # ComplianceResult now holds one row per (device, measure) -- update it in
+        # place rather than creating a second row for the same pair.
+        ComplianceResult.objects.filter(device=device, measure=self.measure).update(
+            status=ComplianceResultStatusChoices.FAIL, timestamp=timezone.now(),
         )
         count2 = generate_snapshots_for_period(period)
 

@@ -14,6 +14,7 @@ router.register('package-assignments', views.PackageAssignmentViewSet)
 router.register('measure-assignments', views.MeasureAssignmentViewSet)
 router.register('exemptions', views.ComplianceExemptionViewSet)
 router.register('results', views.ComplianceResultViewSet)
+router.register('result-history', views.ComplianceResultHistoryViewSet)
 router.register('snapshots', views.ComplianceSnapshotViewSet)
 
 urlpatterns = [

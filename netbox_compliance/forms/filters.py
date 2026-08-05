@@ -21,6 +21,7 @@ from ..models import (
     ComplianceMeasure,
     CompliancePackage,
     ComplianceResult,
+    ComplianceResultHistory,
     ComplianceSnapshot,
     MeasureAssignment,
     PackageAssignment,
@@ -35,6 +36,7 @@ __all__ = (
     'MeasureAssignmentFilterForm',
     'ComplianceExemptionFilterForm',
     'ComplianceResultFilterForm',
+    'ComplianceResultHistoryFilterForm',
     'ComplianceSnapshotFilterForm',
 )
 
@@ -175,6 +177,27 @@ class ComplianceExemptionFilterForm(NetBoxModelFilterSetForm):
 
 class ComplianceResultFilterForm(NetBoxModelFilterSetForm):
     model = ComplianceResult
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag'),
+        FieldSet('device_id', 'measure_id', 'status', 'source', name=_('Result')),
+        FieldSet('timestamp__gte', 'timestamp__lte', name=_('Dates')),
+    )
+    device_id = DynamicModelMultipleChoiceField(
+        queryset=Device.objects.all(),
+        required=False, selector=True, label=_('Device'),
+    )
+    measure_id = DynamicModelMultipleChoiceField(
+        queryset=ComplianceMeasure.objects.all(), required=False, label=_('Measure'),
+    )
+    status = forms.MultipleChoiceField(choices=ComplianceResultStatusChoices, required=False)
+    source = forms.CharField(required=False)
+    timestamp__gte = forms.DateTimeField(required=False, label=_('From'), widget=DatePicker)
+    timestamp__lte = forms.DateTimeField(required=False, label=_('Until'), widget=DatePicker)
+    tag = TagFilterField(model)
+
+
+class ComplianceResultHistoryFilterForm(NetBoxModelFilterSetForm):
+    model = ComplianceResultHistory
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
         FieldSet('device_id', 'measure_id', 'status', 'source', name=_('Result')),

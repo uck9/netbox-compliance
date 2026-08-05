@@ -180,18 +180,47 @@ def _matching_exemptions(device, today=None):
 
 
 def _latest_results_for(device, measure_ids):
-    """Most recent ComplianceResult per measure, for this device."""
+    """
+    ComplianceResult per measure, for this device. Named "_latest_" for
+    continuity with callers -- ComplianceResult now holds at most one row
+    per (device, measure) by construction (unique constraint), so this is
+    just that row, not a pick-the-newest-of-several scan. Full history
+    lives in ComplianceResultHistory (see record_result()) if a caller ever
+    needs more than the current answer.
+    """
     if not measure_ids:
         return {}
-    latest = {}
-    results = (
-        ComplianceResult.objects
-        .filter(device=device, measure_id__in=measure_ids)
-        .order_by('measure_id', '-timestamp')
+    return {
+        result.measure_id: result
+        for result in ComplianceResult.objects.filter(device=device, measure_id__in=measure_ids)
+    }
+
+
+def record_result(device, measure, *, status, value=None, details=None, source='', timestamp=None):
+    """
+    The single write path for a compliance observation: upserts the current
+    ComplianceResult row for (device, measure) in place. A post_save signal
+    (see __init__.py's register_result_history_logging) mirrors every save
+    -- through this function, the plain REST viewset, or the admin form --
+    into an immutable ComplianceResultHistory row, so callers here don't
+    need to think about history at all, just the current answer.
+
+    timestamp always gets bumped to "now" (or the caller's explicit value)
+    on every call, including a no-op repost of the same status/value --
+    update_or_create's `defaults` only apply the model's own
+    default=timezone.now on INSERT, never on UPDATE, so leaving it out of
+    `defaults` would freeze a re-checked device's timestamp at whenever it
+    was first observed.
+    """
+    timestamp = timestamp or timezone.now()
+    result, _created = ComplianceResult.objects.update_or_create(
+        device=device, measure=measure,
+        defaults={
+            'status': status, 'value': value, 'details': details or {},
+            'source': source, 'timestamp': timestamp,
+        },
     )
-    for result in results:
-        latest.setdefault(result.measure_id, result)
-    return latest
+    return result
 
 
 def _apply_status(row, result, now):
@@ -350,8 +379,8 @@ def evaluate_software_version(device):
         return None
 
     status, value, details = compute_software_version_result(device, measure)
-    return ComplianceResult.objects.create(
-        device=device, measure=measure, status=status, value=value, details=details,
+    return record_result(
+        device, measure, status=status, value=value, details=details,
         source=SOFTWARE_VERSION_SOURCE,
     )
 

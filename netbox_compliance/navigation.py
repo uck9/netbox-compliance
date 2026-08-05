@@ -113,6 +113,11 @@ results_items = (
         permissions=['netbox_compliance.view_complianceresult'],
     ),
     PluginMenuItem(
+        link='plugins:netbox_compliance:complianceresulthistory_list',
+        link_text='Result History',
+        permissions=['netbox_compliance.view_complianceresulthistory'],
+    ),
+    PluginMenuItem(
         link='plugins:netbox_compliance:compliancesnapshot_list',
         link_text='Snapshots',
         permissions=['netbox_compliance.view_compliancesnapshot'],

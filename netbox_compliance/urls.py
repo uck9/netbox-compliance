@@ -33,6 +33,10 @@ urlpatterns = [
     path('results/', include(get_model_urls('netbox_compliance', 'complianceresult', detail=False))),
     path('results/<int:pk>/', include(get_model_urls('netbox_compliance', 'complianceresult'))),
 
+    # ComplianceResultHistory (read-only + delete)
+    path('result-history/', include(get_model_urls('netbox_compliance', 'complianceresulthistory', detail=False))),
+    path('result-history/<int:pk>/', include(get_model_urls('netbox_compliance', 'complianceresulthistory'))),
+
     # ComplianceSnapshot (read-only + delete)
     path('snapshots/', include(get_model_urls('netbox_compliance', 'compliancesnapshot', detail=False))),
     path('snapshots/<int:pk>/', include(get_model_urls('netbox_compliance', 'compliancesnapshot'))),

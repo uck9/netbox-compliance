@@ -4,7 +4,7 @@ from django.urls import reverse
 from rest_framework import status
 
 from ..choices import ComplianceMeasureCategoryChoices, ComplianceMeasureResultTypeChoices, ComplianceMeasureSeverityChoices
-from ..models import ComplianceResult, MeasureAssignment
+from ..models import ComplianceResult, ComplianceResultHistory, MeasureAssignment
 from ..models import ComplianceMeasure
 from .base import ComplianceTestMixin
 from .custom import APITestCase
@@ -247,27 +247,23 @@ class BulkResultIngestTest(ComplianceTestMixin, APITestCase):
         self.assertTrue(ComplianceResult.objects.filter(device=self.device, measure=detail_measure).exists())
 
 
-class ComplianceResultLatestFilterTest(ComplianceTestMixin, APITestCase):
+class ComplianceResultCurrentRowOnlyTest(ComplianceTestMixin, APITestCase):
+    """ComplianceResult now holds at most one row per (device, measure) -- reposting
+    the same pair updates that row in place rather than adding a second one."""
     model = ComplianceResult
-    user_permissions = ('netbox_compliance.view_complianceresult',)
+    user_permissions = ('netbox_compliance.view_complianceresult', 'netbox_compliance.add_complianceresult')
 
-    def _make_older_and_newer(self, slug):
-        from django.utils import timezone
+    def test_reposting_same_device_measure_updates_the_existing_row(self):
+        from ..services import record_result
 
-        measure = make_measure(slug)
+        measure = make_measure('repost-measure')
         device = self.make_device()
-        older = ComplianceResult.objects.create(
-            device=device, measure=measure, status='pass', value='true',
-            timestamp=timezone.now() - timezone.timedelta(days=2), source='test',
-        )
-        newer = ComplianceResult.objects.create(
-            device=device, measure=measure, status='fail', value='false',
-            timestamp=timezone.now(), source='test',
-        )
-        return older, newer
+        older = record_result(device, measure, status='pass', value='true', source='test')
 
-    def test_default_returns_only_latest_row_per_device_measure(self):
-        older, newer = self._make_older_and_newer('latest-measure-default')
+        newer = record_result(device, measure, status='fail', value='false', source='test')
+
+        self.assertEqual(newer.pk, older.pk)  # same row, updated in place
+        self.assertEqual(ComplianceResult.objects.filter(device=device, measure=measure).count(), 1)
 
         url = reverse('plugins-api:netbox_compliance-api:complianceresult-list')
         response = self.client.get(url, **self.header)
@@ -275,17 +271,42 @@ class ComplianceResultLatestFilterTest(ComplianceTestMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         ids = {row['id'] for row in response.data['results']}
         self.assertEqual(ids, {newer.pk})
-        self.assertNotIn(older.pk, ids)
 
-    def test_history_true_returns_full_history(self):
-        older, newer = self._make_older_and_newer('latest-measure-history')
 
-        url = reverse('plugins-api:netbox_compliance-api:complianceresult-list')
-        response = self.client.get(f'{url}?history=true', **self.header)
+class ComplianceResultHistoryTest(ComplianceTestMixin, APITestCase):
+    """Every write to ComplianceResult (via record_result()'s upsert) is mirrored into
+    ComplianceResultHistory by a post_save signal -- see __init__.py."""
+    model = ComplianceResultHistory
+    user_permissions = ('netbox_compliance.view_complianceresulthistory',)
+
+    def test_reposting_same_device_measure_appends_to_history(self):
+        from ..services import record_result
+
+        measure = make_measure('history-measure')
+        device = self.make_device()
+        record_result(device, measure, status='pass', value='true', source='test')
+        record_result(device, measure, status='fail', value='false', source='test')
+
+        entries = ComplianceResultHistory.objects.filter(device=device, measure=measure).order_by('timestamp')
+        self.assertEqual(entries.count(), 2)
+        self.assertEqual([e.status for e in entries], ['pass', 'fail'])
+
+        url = reverse('plugins-api:netbox_compliance-api:complianceresulthistory-list')
+        response = self.client.get(url, **self.header)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
-        ids = {row['id'] for row in response.data['results']}
-        self.assertEqual(ids, {older.pk, newer.pk})
+        self.assertEqual(response.data['count'], 2)
+
+    def test_history_survives_result_deletion(self):
+        from ..services import record_result
+
+        measure = make_measure('history-survives-delete')
+        device = self.make_device()
+        result = record_result(device, measure, status='pass', value='true', source='test')
+
+        result.delete()
+
+        self.assertEqual(ComplianceResultHistory.objects.filter(device=device, measure=measure).count(), 1)
 
 
 class DeviceComplianceStatusAPITest(ComplianceTestMixin, APITestCase):

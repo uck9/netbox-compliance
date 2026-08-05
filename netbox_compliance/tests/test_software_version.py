@@ -248,17 +248,30 @@ class SoftwareVersionSignalTest(ComplianceTestMixin, TestCase):
         self.assertEqual(results.count(), 1)
         self.assertEqual(results.first().value, 'target_active_version')
 
-    def test_changing_software_version_creates_a_new_result(self):
+    def test_changing_software_version_updates_the_existing_result_and_logs_history(self):
+        """ComplianceResult holds one row per (device, measure) -- a version change
+        updates that row in place (not a second row), while ComplianceResultHistory
+        (appended automatically by the post_save signal, see __init__.py) gains a
+        new entry for every change so the transition itself isn't lost."""
+        from ..models import ComplianceResultHistory
+
         device = self.make_device(platform=self.versioned_platform)
         device.custom_field_data = {'software_version': '17.12.3'}
         device.save()
+        first_result = ComplianceResult.objects.get(device=device, measure=self.measure)
 
         device.custom_field_data = {'software_version': '16.12.1'}
         device.save()
 
-        results = ComplianceResult.objects.filter(device=device, measure=self.measure).order_by('-timestamp')
-        self.assertEqual(results.count(), 2)
-        self.assertEqual(results.first().value, 'required_upgrade_retired')
+        results = ComplianceResult.objects.filter(device=device, measure=self.measure)
+        self.assertEqual(results.count(), 1)
+        updated_result = results.first()
+        self.assertEqual(updated_result.pk, first_result.pk)  # same row, updated in place
+        self.assertEqual(updated_result.value, 'required_upgrade_retired')
+
+        history = ComplianceResultHistory.objects.filter(device=device, measure=self.measure).order_by('timestamp')
+        self.assertEqual(history.count(), 2)
+        self.assertEqual([h.value for h in history], ['target_active_version', 'required_upgrade_retired'])
 
     def test_unrelated_field_change_does_not_create_a_new_result(self):
         device = self.make_device(platform=self.versioned_platform)

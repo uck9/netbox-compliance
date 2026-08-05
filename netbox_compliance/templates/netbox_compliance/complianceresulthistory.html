@@ -9,15 +9,31 @@
         <table class="table table-hover attr-table">
           <tr>
             <th scope="row">Device</th>
-            <td><a href="{{ object.device.get_absolute_url }}">{{ object.device }}</a></td>
+            <td>
+              {% if object.device %}
+                <a href="{{ object.device.get_absolute_url }}">{{ object.device_name }}</a>
+              {% else %}
+                {{ object.device_name }} <span class="text-muted">(device deleted)</span>
+              {% endif %}
+            </td>
           </tr>
           <tr>
             <th scope="row">Measure</th>
-            <td><a href="{{ object.measure.get_absolute_url }}">{{ object.measure }}</a></td>
+            <td>
+              {% if object.measure %}
+                <a href="{{ object.measure.get_absolute_url }}">{{ object.measure_slug }}</a>
+              {% else %}
+                {{ object.measure_slug }} <span class="text-muted">(measure deleted)</span>
+              {% endif %}
+            </td>
           </tr>
           <tr>
             <th scope="row">Status</th>
             <td>{% badge object.get_status_display bg_color=object.get_status_color %}</td>
+          </tr>
+          <tr>
+            <th scope="row">Value</th>
+            <td>{{ object.value|placeholder }}</td>
           </tr>
           <tr>
             <th scope="row">Timestamp</th>
@@ -41,14 +57,6 @@
       </div>
       {% include 'inc/panels/custom_fields.html' %}
       {% plugin_right_page object %}
-    </div>
-  </div>
-  <div class="row mb-3">
-    <div class="col col-md-12">
-      {% include 'inc/panel_table.html' with table=history_table heading='History (most recent 25)' %}
-      <a href="{% url 'plugins:netbox_compliance:complianceresulthistory_list' %}?device_id={{ object.device.pk }}&measure_id={{ object.measure.pk }}" class="btn btn-outline-secondary">
-        View full history
-      </a>
     </div>
   </div>
 {% endblock content %}
