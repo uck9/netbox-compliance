@@ -16,9 +16,11 @@ router.register('exemptions', views.ComplianceExemptionViewSet)
 router.register('results', views.ComplianceResultViewSet)
 router.register('result-history', views.ComplianceResultHistoryViewSet)
 router.register('snapshots', views.ComplianceSnapshotViewSet)
+router.register('package-reports', views.CompliancePackageReportViewSet)
 
 urlpatterns = [
     path('results/bulk/', views.BulkResultIngestView.as_view(), name='result-bulk'),
+    path('package-reports/bulk/', views.PackageReportBulkIngestView.as_view(), name='package-report-bulk'),
     path('devices/<int:pk>/status/', views.DeviceComplianceStatusView.as_view(), name='device-status'),
     path(
         'devices/<int:pk>/effective-measures/',

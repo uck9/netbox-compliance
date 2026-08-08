@@ -25,6 +25,7 @@ from .choices import (
 from .models import (
     ComplianceExemption,
     ComplianceMeasure,
+    CompliancePackageReport,
     ComplianceResult,
     MeasureAssignment,
     PackageAssignment,
@@ -221,6 +222,25 @@ def record_result(device, measure, *, status, value=None, details=None, source='
         },
     )
     return result
+
+
+def record_package_report(device, package, *, html, source='', timestamp=None):
+    """
+    The single write path for a package's raw evaluation report: upserts
+    the current CompliancePackageReport row for (device, package) in
+    place. No history table -- see CompliancePackageReport's own
+    docstring for why a repost overwriting in place is enough here, unlike
+    ComplianceResult/ComplianceResultHistory.
+    """
+    timestamp = timestamp or timezone.now()
+    report, _created = CompliancePackageReport.objects.update_or_create(
+        device=device, package=package,
+        defaults={
+            'device_name': str(device), 'package_slug': package.slug,
+            'html': html, 'source': source, 'timestamp': timestamp,
+        },
+    )
+    return report
 
 
 def _apply_status(row, result, now):

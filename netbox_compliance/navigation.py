@@ -123,6 +123,11 @@ results_items = (
         permissions=['netbox_compliance.view_compliancesnapshot'],
     ),
     PluginMenuItem(
+        link='plugins:netbox_compliance:compliancepackagereport_list',
+        link_text='Package Reports',
+        permissions=['netbox_compliance.view_compliancepackagereport'],
+    ),
+    PluginMenuItem(
         link='plugins:netbox_compliance:monthly_report',
         link_text='Monthly Report',
         permissions=['netbox_compliance.view_compliancesnapshot'],

@@ -4,6 +4,7 @@ from utilities.views import ViewTab
 
 from .. import services
 from ..choices import EffectiveStatusChoices
+from ..models import CompliancePackageReport
 
 __all__ = ('DeviceComplianceTabView',)
 
@@ -31,6 +32,13 @@ class DeviceComplianceTabView(generic.ObjectView):
         scoring = services.score_device(instance)
         effective = scoring['effective']
 
+        package_reports_by_id = {
+            report.package_id: report
+            for report in CompliancePackageReport.objects.filter(
+                device=instance, package_id__in=[p.pk for p in effective['packages']],
+            )
+        }
+
         packages = []
         for package in sorted(effective['packages'], key=lambda p: p.name):
             rows = sorted(effective['packages'][package], key=lambda r: (r.display_order, r.measure.name))
@@ -46,6 +54,7 @@ class DeviceComplianceTabView(generic.ObjectView):
                 'package': package,
                 'score': scoring['package_scores'][package],
                 'traffic_light': services.package_traffic_light(instance, package, rows=rows),
+                'package_report': package_reports_by_id.get(package.pk),
                 'rows': rows,
                 'passing_rows': passing_rows,
                 'failing_rows': failing_rows,

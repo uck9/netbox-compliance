@@ -20,6 +20,7 @@ from ..models import (
     ComplianceExemption,
     ComplianceMeasure,
     CompliancePackage,
+    CompliancePackageReport,
     ComplianceResult,
     ComplianceResultHistory,
     ComplianceSnapshot,
@@ -38,6 +39,7 @@ __all__ = (
     'ComplianceResultFilterForm',
     'ComplianceResultHistoryFilterForm',
     'ComplianceSnapshotFilterForm',
+    'CompliancePackageReportFilterForm',
 )
 
 
@@ -231,5 +233,22 @@ class ComplianceSnapshotFilterForm(NetBoxModelFilterSetForm):
     compliant = forms.NullBooleanField(
         required=False,
         widget=forms.Select(choices=[('', '---------'), (True, 'Yes'), (False, 'No')]),
+    )
+    tag = TagFilterField(model)
+
+
+class CompliancePackageReportFilterForm(NetBoxModelFilterSetForm):
+    model = CompliancePackageReport
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag'),
+        FieldSet('device_id', 'package_id', name=_('Report')),
+    )
+    device_id = DynamicModelMultipleChoiceField(
+        queryset=Device.objects.all(),
+        required=False, selector=True, label=_('Device'),
+    )
+    package_id = DynamicModelMultipleChoiceField(
+        queryset=CompliancePackage.objects.all(),
+        required=False, selector=True, label=_('Package'),
     )
     tag = TagFilterField(model)

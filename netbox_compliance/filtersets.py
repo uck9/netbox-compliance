@@ -18,6 +18,7 @@ from .models import (
     ComplianceExemption,
     ComplianceMeasure,
     CompliancePackage,
+    CompliancePackageReport,
     ComplianceResult,
     ComplianceResultHistory,
     ComplianceSnapshot,
@@ -36,6 +37,7 @@ __all__ = (
     'ComplianceResultFilterSet',
     'ComplianceResultHistoryFilterSet',
     'ComplianceSnapshotFilterSet',
+    'CompliancePackageReportFilterSet',
 )
 
 
@@ -347,3 +349,21 @@ class ComplianceSnapshotFilterSet(NetBoxModelFilterSet):
         if not value.strip():
             return queryset
         return queryset.filter(Q(device_name__icontains=value))
+
+
+class CompliancePackageReportFilterSet(NetBoxModelFilterSet):
+    device_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='device', queryset=Device.objects.all(), label=_('Device'),
+    )
+    package_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='package', queryset=CompliancePackage.objects.all(), label=_('Package'),
+    )
+
+    class Meta:
+        model = CompliancePackageReport
+        fields = ('id', 'device_name', 'package_slug')
+
+    def search(self, queryset, name, value):
+        if not value.strip():
+            return queryset
+        return queryset.filter(Q(device_name__icontains=value) | Q(package_slug__icontains=value))

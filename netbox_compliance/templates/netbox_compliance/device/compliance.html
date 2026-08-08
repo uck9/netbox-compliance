@@ -13,7 +13,14 @@
       <div class="col col-md-12">
         <div class="card">
           <h5 class="card-header d-flex justify-content-between align-items-center" id="package-{{ entry.package.slug }}">
-            <a href="{{ entry.package.get_absolute_url }}">{{ entry.package.name }}</a>
+            <span>
+              <a href="{{ entry.package.get_absolute_url }}">{{ entry.package.name }}</a>
+              {% if entry.package_report %}
+                <a href="{{ entry.package_report.get_raw_url }}" target="_blank" title="{% trans "View raw report" %}" data-bs-toggle="tooltip">
+                  <i class="mdi mdi-file-document-outline" aria-hidden="true"></i>
+                </a>
+              {% endif %}
+            </span>
             <span>
               {% badge '' bg_color=entry.traffic_light show_empty=True %} {{ entry.score }}%
               <span class="badge text-bg-danger ms-2">{{ entry.failing_count }} {% trans "failing" %}</span>

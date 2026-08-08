@@ -41,6 +41,15 @@ urlpatterns = [
     path('snapshots/', include(get_model_urls('netbox_compliance', 'compliancesnapshot', detail=False))),
     path('snapshots/<int:pk>/', include(get_model_urls('netbox_compliance', 'compliancesnapshot'))),
 
+    # CompliancePackageReport (read-only + delete)
+    path('package-reports/', include(get_model_urls('netbox_compliance', 'compliancepackagereport', detail=False))),
+    path('package-reports/<int:pk>/', include(get_model_urls('netbox_compliance', 'compliancepackagereport'))),
+    path(
+        'package-reports/<int:pk>/raw/',
+        views.CompliancePackageReportRawView.as_view(),
+        name='compliancepackagereport_raw',
+    ),
+
     # Monthly report
     path('reports/', views.MonthlyReportView.as_view(), name='monthly_report'),
 ]
