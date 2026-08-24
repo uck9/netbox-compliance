@@ -132,6 +132,11 @@ results_items = (
         link_text='Monthly Report',
         permissions=['netbox_compliance.view_compliancesnapshot'],
     ),
+    PluginMenuItem(
+        link='plugins:netbox_compliance:status_report',
+        link_text='Package & Test Status Report',
+        permissions=['netbox_compliance.view_complianceresult'],
+    ),
 )
 
 menu = PluginMenu(

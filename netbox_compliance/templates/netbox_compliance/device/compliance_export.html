@@ -1,0 +1,164 @@
+{% load compliance_export %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ device.name }} — Compliance Report</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #212529; background: #fff; margin: 0; padding: 2rem;
+    max-width: 1100px; margin-left: auto; margin-right: auto;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 2px solid #dee2e6; padding-bottom: 0.35rem; }
+  h3 { font-size: 1rem; margin-top: 1.5rem; color: #495057; }
+  .meta { color: #6c757d; margin-bottom: 1.5rem; }
+  .meta span { margin-right: 1.25rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.75rem; font-size: 0.9rem; }
+  th, td { border: 1px solid #dee2e6; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+  th { background: #f1f3f5; }
+  .badge { display: inline-block; padding: 0.2em 0.6em; border-radius: 0.75em; color: #fff; font-size: 0.8em; font-weight: 600; white-space: nowrap; }
+  .toc { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem 1.5rem; margin: 1.5rem 0; }
+  .toc a { color: #1971c2; text-decoration: none; }
+  .toc li { margin-bottom: 0.25rem; }
+  .banner { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; color: #fff; font-weight: 600; font-size: 1.1rem; }
+  .package-report-embed { border: 1px solid #dee2e6; border-radius: 6px; margin-top: 0.75rem; }
+  .package-report-embed iframe { width: 100%; height: 600px; border: 0; display: block; }
+  .muted { color: #6c757d; }
+  @media print {
+    body { padding: 0.5rem; }
+    .toc { break-inside: avoid; }
+    tr { break-inside: avoid; }
+    h2 { break-before: page; }
+    h2:first-of-type { break-before: auto; }
+  }
+</style>
+</head>
+<body>
+
+<h1>{{ device.name }}</h1>
+<div class="meta">
+  <span>Site: {{ device.site|default:"—" }}</span>
+  <span>Tenant: {{ device.tenant|default:"—" }}</span>
+  <span>Platform: {{ device.platform|default:"—" }}</span>
+  <span>Role: {{ device.role|default:"—" }}</span>
+  <span>Generated: {{ generated_at }}</span>
+</div>
+
+<span class="banner" style="background: {% if compliant %}#2f9e44{% else %}#e03131{% endif %};">
+  Overall Score: {{ overall_score }}% &mdash; {% if compliant %}Compliant{% else %}Non-compliant{% endif %}
+</span>
+
+{% if packages or direct_rows %}
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    {% for entry in packages %}
+      <li><a href="#package-{{ entry.package.slug }}">{{ entry.package.name }}</a> &mdash; {{ entry.score }}%</li>
+    {% endfor %}
+    {% if direct_rows %}<li><a href="#direct-measures">Direct Measures</a></li>{% endif %}
+    {% if exemptions_applied %}<li><a href="#exemptions">Exemptions Applied</a></li>{% endif %}
+  </ul>
+</div>
+{% endif %}
+
+{% for entry in packages %}
+<h2 id="package-{{ entry.package.slug }}">
+  {{ entry.package.name }}
+  <span class="badge" style="background: {{ entry.traffic_light|color_hex }};">{{ entry.score }}%</span>
+</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Test</th>
+      <th>Severity</th>
+      <th>Weight</th>
+      <th>Required</th>
+      <th>Status</th>
+      <th>Value</th>
+      <th>Details</th>
+      <th>Last Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in entry.rows %}
+    <tr>
+      <td>{{ row.measure.name }}</td>
+      <td><span class="badge" style="background: {{ row.measure.get_severity_color|color_hex }};">{{ row.measure.get_severity_display }}</span></td>
+      <td>{{ row.weight }}</td>
+      <td>{% if row.required %}Yes{% else %}No{% endif %}</td>
+      <td><span class="badge" style="background: {{ row.display_color|color_hex }};">{{ row.display_label }}</span></td>
+      <td>{{ row.value_display|default:"—" }}</td>
+      <td>{% if row.result %}{{ row.result.details|format_details:row.result.status|default:"—" }}{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
+      <td>{% if row.result %}{{ row.result.timestamp }}{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if entry.package_report %}
+<h3>External Evaluation Report (source: {{ entry.package_report.source|default:"—" }}, {{ entry.package_report.timestamp }})</h3>
+<div class="package-report-embed">
+  <iframe srcdoc="{{ entry.package_report.html }}"></iframe>
+</div>
+{% endif %}
+{% endfor %}
+
+{% if direct_rows %}
+<h2 id="direct-measures">Direct Measures</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Test</th>
+      <th>Severity</th>
+      <th>Weight</th>
+      <th>Status</th>
+      <th>Value</th>
+      <th>Details</th>
+      <th>Last Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in direct_rows %}
+    <tr>
+      <td>{{ row.measure.name }}</td>
+      <td><span class="badge" style="background: {{ row.measure.get_severity_color|color_hex }};">{{ row.measure.get_severity_display }}</span></td>
+      <td>{{ row.weight }}</td>
+      <td><span class="badge" style="background: {{ row.display_color|color_hex }};">{{ row.display_label }}</span></td>
+      <td>{{ row.value_display|default:"—" }}</td>
+      <td>{% if row.result %}{{ row.result.details|format_details:row.result.status|default:"—" }}{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
+      <td>{% if row.result %}{{ row.result.timestamp }}{% else %}<span class="muted">&mdash;</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if exemptions_applied %}
+<h2 id="exemptions">Exemptions Applied</h2>
+<table>
+  <thead>
+    <tr><th>Scope</th><th>Justification</th></tr>
+  </thead>
+  <tbody>
+    {% for exemption in exemptions_applied %}
+    <tr>
+      <td>{% if exemption.measure %}{{ exemption.measure.name }}{% else %}{{ exemption.package.name }} (whole package){% endif %}</td>
+      <td>{{ exemption.justification|default:"—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if not packages and not direct_rows %}
+<p class="muted">This device has no effective compliance measures.</p>
+{% endif %}
+
+<p class="muted" style="margin-top: 3rem; font-size: 0.8rem;">Generated by NetBox Compliance Plugin.</p>
+
+</body>
+</html>

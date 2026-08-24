@@ -1,0 +1,230 @@
+{% extends 'base/layout.html' %}
+{% load helpers %}
+{% load i18n %}
+
+{% block title %}{% trans "Package & Test Status Report" %}{% endblock %}
+
+{% block content %}
+<style>
+  .status-report-wrap { overflow-x: auto; }
+  .status-report-table thead th { white-space: nowrap; }
+  .status-report-table th.device-col,
+  .status-report-table td.device-col {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    box-shadow: 1px 0 0 var(--bs-border-color);
+  }
+  .status-report-table thead th.device-col { z-index: 3; }
+  .status-report-table td.blob-col { text-align: center; min-width: 56px; }
+  .status-report-table th.blob-col { min-width: 90px; }
+  /* Severity ring around a failing/error/stale status dot -- thicker + brighter for higher
+     severity, so a critical-test failure visually outranks a low/medium one at a glance,
+     not just via the tooltip. Not applied to passing/N/A cells -- severity only matters
+     once something's actually wrong. */
+  .severity-ring { display: inline-block; border-radius: 0; }
+  .severity-ring-critical { outline: 3px solid #dc3545; outline-offset: 2px; }
+  .severity-ring-high { outline: 2px solid #fd7e14; outline-offset: 2px; }
+  .severity-ring-medium { outline: 2px solid #ffc107; outline-offset: 1px; }
+  .severity-ring-low { outline: 1px solid #0d6efd; outline-offset: 1px; }
+  .severity-ring-informational { outline: 1px dashed #6c757d; outline-offset: 1px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0">{% trans "Package & Test Status Report" %}</h2>
+  <div class="d-flex align-items-center gap-2">
+    <a href="{{ csv_url }}" class="btn btn-sm btn-success">
+      <i class="mdi mdi-download"></i> {% trans "Export CSV" %}
+    </a>
+  </div>
+</div>
+
+{# ── Filter bar ── #}
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="row g-3 align-items-end">
+      <input type="hidden" name="report" value="{{ report_key }}">
+      <div class="col-auto">
+        <label class="form-label form-label-sm mb-1">{% trans "Site" %}</label>
+        {{ form.site }}
+      </div>
+      <div class="col-auto">
+        <label class="form-label form-label-sm mb-1">{% trans "Tenant" %}</label>
+        {{ form.tenant }}
+      </div>
+      <div class="col-auto">
+        <label class="form-label form-label-sm mb-1">{% trans "Package" %}</label>
+        {{ form.package }}
+      </div>
+      <div class="col-auto">
+        <label class="form-label form-label-sm mb-1">{% trans "Test" %}</label>
+        {{ form.measure }}
+      </div>
+      <div class="col-auto d-flex flex-column gap-2 justify-content-end">
+        <input type="hidden" name="submitted" value="1">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="mdi mdi-filter"></i> {% trans "Apply" %}</button>
+        <a href="?report={{ report_key }}" class="btn btn-sm btn-outline-secondary">{% trans "Clear" %}</a>
+      </div>
+    </form>
+    <p class="text-muted small mb-0 mt-2">
+      <i class="mdi mdi-information-outline me-1"></i>
+      {% trans "Hold Ctrl / Cmd to select multiple. Leave Package/Test blank to show every active one. On the By Test tab, setting Package alone narrows the columns to that package's own tests." %}
+    </p>
+  </div>
+</div>
+
+{# ── Tabs ── #}
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item">
+    <a class="nav-link {% if report_key == 'by_package' %}active{% endif %}" href="{{ tab_urls.by_package }}">
+      <i class="mdi mdi-package-variant-closed me-1"></i>{% trans "By Package" %}
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if report_key == 'by_test' %}active{% endif %}" href="{{ tab_urls.by_test }}">
+      <i class="mdi mdi-checkbox-marked-circle-outline me-1"></i>{% trans "By Test" %}
+    </a>
+  </li>
+</ul>
+
+{% if not submitted %}
+<div class="alert alert-secondary d-flex align-items-center gap-2">
+  <i class="mdi mdi-filter-outline fs-5"></i>
+  <span>{% trans "Select filters above and click" %} <strong>{% trans "Apply" %}</strong> {% trans "to generate the report." %}</span>
+</div>
+
+{% else %}
+
+{% if report_key == "by_package" %}
+
+<div class="d-flex align-items-center gap-3 mb-3">
+  <span title="{% trans 'Every required measure passed (or is not applicable)' %}">{% badge '' bg_color='green' show_empty=True %} {% trans "Compliant" %}</span>
+  <span title="{% trans 'Below the package amber threshold, or a critical/high severity required measure is failing' %}">{% badge '' bg_color='red' show_empty=True %} {% trans "Non-compliant" %}</span>
+  <span title="{% trans 'Below 100% but above the package amber threshold' %}">{% badge '' bg_color='amber' show_empty=True %} {% trans "Amber" %}</span>
+  <span title="{% trans 'Package not assigned to this device, or no results yet' %}">{% badge '' bg_color='grey' show_empty=True %} {% trans "N/A / Pending" %}</span>
+</div>
+
+{% if not packages %}
+  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No packages match the current filter." %}</div>
+{% elif not rows %}
+  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No devices match the current filter." %}</div>
+{% else %}
+<div class="card">
+  <div class="card-body p-0">
+    <div class="status-report-wrap">
+      <table class="table table-hover table-sm mb-0 status-report-table">
+        <thead class="table-dark">
+          <tr>
+            <th class="device-col bg-body" style="min-width:220px">{% trans "Device" %}</th>
+            {% for package in packages %}
+              <th class="blob-col"><a href="{{ package.get_absolute_url }}" class="text-white">{{ package.name }}</a></th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td class="device-col bg-body">
+              <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}">{{ row.device.name }}</a>
+              <a href="{% url 'dcim:device_compliance_export' pk=row.device.pk %}?download=1" title="{% trans 'Download full compliance report for this device' %}" class="text-muted ms-1">
+                <i class="mdi mdi-download" aria-hidden="true"></i>
+              </a>
+              <div class="text-muted small">
+                {{ row.device.site|default:"—" }}{% if row.device.tenant %} &middot; {{ row.device.tenant }}{% endif %}
+              </div>
+            </td>
+            {% for cell in row.cells %}
+              <td class="blob-col">
+                <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}#package-{{ cell.package.slug }}"
+                   title="{{ cell.package.name }}: {% if cell.applicable %}{{ cell.score }}%{% else %}{% trans 'Not applicable' %}{% endif %}"
+                   class="text-reset text-decoration-none">
+                  {% badge '' bg_color=cell.color show_empty=True %}
+                </a>
+              </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% elif report_key == "by_test" %}
+
+<div class="d-flex align-items-center gap-3 mb-2">
+  <span>{% badge '' bg_color='green' show_empty=True %} {% trans "Pass" %}</span>
+  <span>{% badge '' bg_color='red' show_empty=True %} {% trans "Fail" %}</span>
+  <span>{% badge '' bg_color='dark-red' show_empty=True %} {% trans "Error" %}</span>
+  <span>{% badge '' bg_color='orange' show_empty=True %} {% trans "Stale" %}</span>
+  <span title="{% trans 'Test not assigned/exempt for this device, or no result yet' %}">{% badge '' bg_color='grey' show_empty=True %} {% trans "N/A / Pending" %}</span>
+</div>
+<div class="d-flex align-items-center gap-3 mb-3 text-muted small">
+  <span class="me-1">{% trans "Severity of a failing/error/stale test:" %}</span>
+  <span><span class="severity-ring severity-ring-critical">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Critical" %}</span>
+  <span><span class="severity-ring severity-ring-high">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "High" %}</span>
+  <span><span class="severity-ring severity-ring-medium">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Medium" %}</span>
+  <span><span class="severity-ring severity-ring-low">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Low" %}</span>
+  <span><span class="severity-ring severity-ring-informational">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Informational" %}</span>
+</div>
+
+{% if not measures %}
+  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No tests match the current filter." %}</div>
+{% elif not rows %}
+  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No devices match the current filter." %}</div>
+{% else %}
+<div class="card">
+  <div class="card-body p-0">
+    <div class="status-report-wrap">
+      <table class="table table-hover table-sm mb-0 status-report-table">
+        <thead class="table-dark">
+          <tr>
+            <th class="device-col bg-body" style="min-width:220px">{% trans "Device" %}</th>
+            {% for measure in measures %}
+              <th class="blob-col">
+                <a href="{{ measure.get_absolute_url }}" class="text-white">{{ measure.name }}</a>
+                <div class="mt-1">
+                  <span class="badge text-bg-{{ measure.get_severity_color }}" style="font-size:0.6rem;">
+                    {{ measure.get_severity_display }}
+                  </span>
+                </div>
+              </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td class="device-col bg-body">
+              <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}">{{ row.device.name }}</a>
+              <a href="{% url 'dcim:device_compliance_export' pk=row.device.pk %}?download=1" title="{% trans 'Download full compliance report for this device' %}" class="text-muted ms-1">
+                <i class="mdi mdi-download" aria-hidden="true"></i>
+              </a>
+              <div class="text-muted small">
+                {{ row.device.site|default:"—" }}{% if row.device.tenant %} &middot; {{ row.device.tenant }}{% endif %}
+              </div>
+            </td>
+            {% for cell in row.cells %}
+              <td class="blob-col">
+                <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}#measure-{{ cell.measure.slug }}"
+                   title="{{ cell.measure.name }} ({{ cell.measure.get_severity_display }}): {{ cell.status_label }}{% if cell.value %} ({{ cell.value }}){% endif %}"
+                   class="text-reset text-decoration-none">
+                  <span{% if cell.applicable and cell.color != 'green' %} class="severity-ring severity-ring-{{ cell.measure.severity }}"{% endif %}>
+                    {% badge '' bg_color=cell.color show_empty=True %}
+                  </span>
+                </a>
+              </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endif %}
+{% endblock content %}

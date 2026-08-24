@@ -1,5 +1,6 @@
 {% extends 'generic/object.html' %}
 {% load plugins %}
+{% load compliance_details %}
 
 {% block content %}
   <div class="row mb-3">
@@ -11,7 +12,7 @@
             <th scope="row">Device</th>
             <td>
               {% if object.device %}
-                <a href="{{ object.device.get_absolute_url }}">{{ object.device_name }}</a>
+                <a href="{% url 'dcim:device_compliance' pk=object.device.pk %}">{{ object.device_name }}</a>
               {% else %}
                 {{ object.device_name }} <span class="text-muted">(device deleted)</span>
               {% endif %}
@@ -52,7 +53,7 @@
       <div class="card">
         <h5 class="card-header">Details</h5>
         <div class="card-body">
-          <pre>{{ object.details|json }}</pre>
+          {{ object.details|render_details:object.status }}
         </div>
       </div>
       {% include 'inc/panels/custom_fields.html' %}

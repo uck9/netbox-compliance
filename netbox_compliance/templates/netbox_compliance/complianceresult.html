@@ -1,5 +1,6 @@
 {% extends 'generic/object.html' %}
 {% load plugins %}
+{% load compliance_details %}
 
 {% block content %}
   <div class="row mb-3">
@@ -9,7 +10,7 @@
         <table class="table table-hover attr-table">
           <tr>
             <th scope="row">Device</th>
-            <td><a href="{{ object.device.get_absolute_url }}">{{ object.device }}</a></td>
+            <td><a href="{% url 'dcim:device_compliance' pk=object.device.pk %}">{{ object.device }}</a></td>
           </tr>
           <tr>
             <th scope="row">Measure</th>
@@ -36,7 +37,7 @@
       <div class="card">
         <h5 class="card-header">Details</h5>
         <div class="card-body">
-          <pre>{{ object.details|json }}</pre>
+          {{ object.details|render_details:object.status }}
         </div>
       </div>
       {% include 'inc/panels/custom_fields.html' %}

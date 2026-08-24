@@ -52,4 +52,7 @@ urlpatterns = [
 
     # Monthly report
     path('reports/', views.MonthlyReportView.as_view(), name='monthly_report'),
+
+    # Package / test status report
+    path('reports/status/', views.PackageTestStatusReportView.as_view(), name='status_report'),
 ]

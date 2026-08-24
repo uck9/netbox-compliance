@@ -62,6 +62,23 @@ class NetBoxComplianceConfig(PluginConfig):
             'netbox_compliance.views.DeviceComplianceTabView',
         )
 
+    def register_device_compliance_export(self) -> None:
+        """
+        Register the standalone per-device compliance export/download endpoint on
+        dcim.Device (resolves to dcim:device_compliance_export) -- same "must
+        happen here, not this plugin's own urls.py" reason as
+        register_device_compliance_tab above. Deliberately not a ViewTab (no
+        `tab` attribute on DeviceComplianceExportView) -- it's a document to
+        download/print, not another tab in the device page's nav bar; it's
+        linked from the Compliance tab template instead.
+        """
+        from dcim.models import Device
+        from utilities.views import register_model_view
+
+        register_model_view(Device, 'compliance_export')(
+            'netbox_compliance.views.DeviceComplianceExportView',
+        )
+
     def register_software_version_evaluation(self) -> None:
         """
         Recompute the `software-version` ComplianceResult whenever a Device's
@@ -144,6 +161,7 @@ class NetBoxComplianceConfig(PluginConfig):
         from . import dashboard, jobs  # noqa: F401
 
         self.register_device_compliance_tab()
+        self.register_device_compliance_export()
         self.register_software_version_evaluation()
         self.register_result_cache_invalidation()
         self.register_result_history_logging()

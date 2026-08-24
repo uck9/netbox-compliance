@@ -7,7 +7,19 @@
     .compliance-collapse-toggle td { cursor: pointer; }
     .compliance-collapse-toggle .mdi-chevron-right { transition: transform 0.15s ease-in-out; }
     .compliance-collapse-toggle[aria-expanded="true"] .mdi-chevron-right { transform: rotate(90deg); }
+    [id^="package-"], [id^="measure-"], #direct-measures { scroll-margin-top: 80px; }
+    tr[id^="measure-"].compliance-anchor-target { outline: 2px solid var(--bs-primary, #0d6efd); outline-offset: -2px; }
   </style>
+
+  <div class="d-flex justify-content-end gap-2 mb-3">
+    <a href="{% url 'dcim:device_compliance_export' pk=object.pk %}" target="_blank" class="btn btn-sm btn-outline-secondary">
+      <i class="mdi mdi-file-document-outline" aria-hidden="true"></i> {% trans "View Full Report" %}
+    </a>
+    <a href="{% url 'dcim:device_compliance_export' pk=object.pk %}?download=1" class="btn btn-sm btn-success">
+      <i class="mdi mdi-download" aria-hidden="true"></i> {% trans "Download Report" %}
+    </a>
+  </div>
+
   {% for entry in packages %}
     <div class="row mb-3">
       <div class="col col-md-12">
@@ -42,7 +54,7 @@
             </thead>
             <tbody>
               {% for row in entry.failing_rows %}
-                <tr>
+                <tr id="measure-{{ row.measure.slug }}">
                   <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
                   <td>{{ row.measure.short_description|placeholder }}</td>
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
@@ -74,7 +86,7 @@
               </tbody>
               <tbody class="collapse" id="passing-{{ entry.package.slug }}">
                 {% for row in entry.passing_rows %}
-                  <tr>
+                  <tr id="measure-{{ row.measure.slug }}">
                     <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
                     <td>{{ row.measure.short_description|placeholder }}</td>
                     <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
@@ -107,7 +119,7 @@
               </tbody>
               <tbody class="collapse" id="not-applicable-{{ entry.package.slug }}">
                 {% for row in entry.not_applicable_rows %}
-                  <tr>
+                  <tr id="measure-{{ row.measure.slug }}">
                     <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
                     <td>{{ row.measure.short_description|placeholder }}</td>
                     <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
@@ -138,7 +150,7 @@
   {% if direct_rows %}
     <div class="row mb-3">
       <div class="col col-md-12">
-        <div class="card">
+        <div class="card" id="direct-measures">
           <h5 class="card-header">Direct Measures</h5>
           <table class="table table-hover mb-0">
             <thead>
@@ -154,7 +166,7 @@
             </thead>
             <tbody>
               {% for row in direct_rows %}
-                <tr>
+                <tr id="measure-{{ row.measure.slug }}">
                   <td><a href="{{ row.measure.get_absolute_url }}">{{ row.measure.name }}</a></td>
                   <td>{{ row.measure.short_description|placeholder }}</td>
                   <td>{% badge row.measure.get_severity_display bg_color=row.measure.get_severity_color %}</td>
@@ -215,4 +227,30 @@
   {% if not packages and not direct_rows %}
     <div class="alert alert-info">This device has no effective compliance measures.</div>
   {% endif %}
+
+  <script>
+    // Deep-linked from the Package & Test Status Report (#package-<slug> / #measure-<slug>):
+    // the target row may be inside a collapsed "passing"/"not applicable" section, so expand
+    // it before scrolling, and briefly highlight the row so it's easy to spot in a long table.
+    document.addEventListener('DOMContentLoaded', function () {
+      if (!window.location.hash) return;
+      var target;
+      try {
+        target = document.querySelector(window.location.hash);
+      } catch (e) {
+        return;
+      }
+      if (!target) return;
+
+      var collapse = target.closest('.collapse');
+      if (collapse && !collapse.classList.contains('show')) {
+        collapse.classList.add('show');
+      }
+
+      target.scrollIntoView({block: 'center'});
+      if (target.tagName === 'TR') {
+        target.classList.add('compliance-anchor-target');
+      }
+    });
+  </script>
 {% endblock content %}

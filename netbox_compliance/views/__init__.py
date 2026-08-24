@@ -6,3 +6,4 @@ from .package_reports import *  # noqa: F401,F403
 from .reports import *  # noqa: F401,F403
 from .results import *  # noqa: F401,F403
 from .snapshots import *  # noqa: F401,F403
+from .status_report import *  # noqa: F401,F403

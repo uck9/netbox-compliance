@@ -9,7 +9,14 @@ from ..choices import (
     ComplianceResultStatusChoices,
     CompliancePackageStatusChoices,
 )
-from ..models import ComplianceMeasure, CompliancePackage, ComplianceResult, PackageAssignment, PackageMeasure
+from ..models import (
+    ComplianceMeasure,
+    CompliancePackage,
+    ComplianceResult,
+    MeasureAssignment,
+    PackageAssignment,
+    PackageMeasure,
+)
 from .base import ComplianceTestMixin
 
 
@@ -76,3 +83,30 @@ class DeviceComplianceTabBucketingTest(ComplianceTestMixin, TestCase):
         self.assertIn('Short desc for pass', content)
         self.assertIn('Short desc for fail', content)
         self.assertIn('Short desc for na', content)
+
+
+class DeviceComplianceTabDirectMeasuresTest(ComplianceTestMixin, TestCase):
+    """Regression test: get_extra_context's direct-measures branch used to call the
+    never-defined services.render_value_display() (a copy-paste slip -- the package-
+    measures branch just above it correctly calls render_display_template()), so any
+    device with a direct MeasureAssignment would 500 on this tab. No prior test
+    exercised a direct measure here, so nothing caught it until now."""
+
+    def setUp(self):
+        self.client = Client()
+        self.user = get_user_model().objects.create_superuser(username='tester-direct', password='pw')
+        self.client.force_login(self.user)
+
+    def test_tab_renders_with_direct_measure_assignment(self):
+        device = self.make_device(site=self.site)
+        measure = make_measure('direct-measure', title='Direct check')
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+        ComplianceResult.objects.create(
+            device=device, measure=measure, status=ComplianceResultStatusChoices.PASS,
+            timestamp=timezone.now(), source='test',
+        )
+
+        response = self.client.get(reverse('dcim:device_compliance', args=[device.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Direct check')
