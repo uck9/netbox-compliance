@@ -37,6 +37,22 @@ class PackageAssignmentScopeTest(ComplianceTestMixin, TestCase):
         assignment = PackageAssignment(package=self.package, site=self.site)
         assignment.full_clean()  # should not raise
 
+    def test_tenant_narrowing_with_non_device_scope_is_valid(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        assignment = PackageAssignment(package=self.package, platform=self.platform, tenant=tenant)
+        assignment.full_clean()  # should not raise
+
+    def test_tenant_narrowing_with_device_scope_is_invalid(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        device = self.make_device()
+        assignment = PackageAssignment(package=self.package, device=device, tenant=tenant)
+        with self.assertRaises(ValidationError):
+            assignment.full_clean()
+
 
 class ComplianceExemptionScopeTest(ComplianceTestMixin, TestCase):
     @classmethod

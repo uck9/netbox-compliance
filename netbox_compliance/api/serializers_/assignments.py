@@ -2,6 +2,7 @@ from dcim.models import Device, DeviceRole, Platform, Site, SiteGroup
 from extras.models import Tag
 from netbox.api.serializers import NetBoxModelSerializer
 from rest_framework import serializers
+from tenancy.models import Tenant
 
 from ...models import ComplianceMeasure, CompliancePackage, MeasureAssignment, PackageAssignment
 
@@ -26,14 +27,16 @@ class PackageAssignmentSerializer(NetBoxModelSerializer):
     platform_name = serializers.SerializerMethodField()
     tag = serializers.PrimaryKeyRelatedField(queryset=Tag.objects.all(), required=False, allow_null=True)
     tag_name = serializers.SerializerMethodField()
+    tenant = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all(), required=False, allow_null=True)
+    tenant_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PackageAssignment
         fields = (
             'id', 'url', 'display', 'package', 'package_name', 'device', 'device_name',
             'device_role', 'device_role_name', 'site', 'site_name', 'site_group', 'site_group_name',
-            'platform', 'platform_name', 'tag', 'tag_name', 'description', 'tags', 'custom_fields',
-            'created', 'last_updated',
+            'platform', 'platform_name', 'tag', 'tag_name', 'tenant', 'tenant_name',
+            'description', 'tags', 'custom_fields', 'created', 'last_updated',
         )
         brief_fields = ('id', 'url', 'display', 'package', 'package_name')
 
@@ -54,6 +57,9 @@ class PackageAssignmentSerializer(NetBoxModelSerializer):
 
     def get_tag_name(self, obj):
         return obj.tag.name if obj.tag else None
+
+    def get_tenant_name(self, obj):
+        return obj.tenant.name if obj.tenant else None
 
 
 class MeasureAssignmentSerializer(NetBoxModelSerializer):

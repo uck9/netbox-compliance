@@ -69,7 +69,7 @@ class PackageMeasureViewSet(NetBoxModelViewSet):
 
 class PackageAssignmentViewSet(NetBoxModelViewSet):
     queryset = PackageAssignment.objects.select_related(
-        'package', 'device', 'device_role', 'site', 'site_group', 'platform', 'tag',
+        'package', 'device', 'device_role', 'site', 'site_group', 'platform', 'tag', 'tenant',
     )
     serializer_class = serializers.PackageAssignmentSerializer
     filterset_class = filtersets.PackageAssignmentFilterSet

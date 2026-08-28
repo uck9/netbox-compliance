@@ -21,6 +21,13 @@ class PackageAssignment(NetBoxModel):
     Assigns a CompliancePackage to a scope. Exactly one scope field must be
     set. A device's assigned packages are the union of all PackageAssignment
     rows whose scope matches the device.
+
+    `tenant` is an optional *narrowing* filter, not one of the SCOPE_FIELDS:
+    when set, the row only matches devices whose own tenant is that tenant,
+    on top of the scope field. This is how you say "package X on all
+    Catalyst platforms, but only for tenant ACME" without restructuring the
+    assignment. It has no meaning alongside a device-scoped row (a device
+    already pins its tenant), so that combination is rejected in clean().
     """
     package = models.ForeignKey(
         to=CompliancePackage,
@@ -76,6 +83,15 @@ class PackageAssignment(NetBoxModel):
         blank=True,
         verbose_name=_('tag'),
     )
+    tenant = models.ForeignKey(
+        to='tenancy.Tenant',
+        on_delete=models.CASCADE,
+        related_name='compliance_package_assignments',
+        null=True,
+        blank=True,
+        verbose_name=_('tenant'),
+        help_text=_('Optional: narrow the scope above to devices in this tenant only'),
+    )
     description = models.TextField(
         blank=True,
         verbose_name=_('description'),
@@ -88,6 +104,8 @@ class PackageAssignment(NetBoxModel):
         verbose_name_plural = _('package assignments')
 
     def __str__(self):
+        if self.tenant_id:
+            return f'{self.package} -> {self.scope} (tenant: {self.tenant})'
         return f'{self.package} -> {self.scope}'
 
     def get_absolute_url(self):
@@ -111,6 +129,10 @@ class PackageAssignment(NetBoxModel):
             raise ValidationError(
                 _('Only one of device, device role, site, site group, platform, or tag may be set.')
             )
+        if self.tenant_id and self.device_id:
+            raise ValidationError({
+                'tenant': _('Tenant narrowing does not apply to a device-scoped assignment.'),
+            })
 
 
 class MeasureAssignment(NetBoxModel):

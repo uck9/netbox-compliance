@@ -21,15 +21,16 @@ class PackageAssignmentTable(NetBoxTable):
         template_code='{% if value %}<span class="badge" style="background-color: {{ value.color|default:"9e9e9e" }}">{{ value }}</span>{% endif %}',
         verbose_name='Tag',
     )
+    tenant = tables.Column(linkify=True, verbose_name='Tenant (narrowed)')
     tags = columns.TagColumn(url_name='plugins:netbox_compliance:packageassignment_list')
 
     class Meta(NetBoxTable.Meta):
         model = PackageAssignment
         fields = (
             'pk', 'id', 'package', 'device', 'device_role', 'site', 'site_group',
-            'platform', 'tag', 'description', 'tags', 'created', 'last_updated', 'actions',
+            'platform', 'tag', 'tenant', 'description', 'tags', 'created', 'last_updated', 'actions',
         )
-        default_columns = ('pk', 'package', 'device', 'device_role', 'site', 'site_group', 'platform', 'tag')
+        default_columns = ('pk', 'package', 'device', 'device_role', 'site', 'site_group', 'platform', 'tag', 'tenant')
 
 
 class MeasureAssignmentTable(NetBoxTable):

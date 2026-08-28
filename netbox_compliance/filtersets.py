@@ -160,6 +160,13 @@ class PackageAssignmentFilterSet(NetBoxModelFilterSet):
         field_name='tag__slug', queryset=Tag.objects.all(),
         to_field_name='slug', label=_('Tag (slug)'),
     )
+    tenant_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='tenant', queryset=Tenant.objects.all(), label=_('Tenant (ID)'),
+    )
+    tenant = django_filters.ModelMultipleChoiceFilter(
+        field_name='tenant__slug', queryset=Tenant.objects.all(),
+        to_field_name='slug', label=_('Tenant (slug)'),
+    )
 
     class Meta:
         model = PackageAssignment

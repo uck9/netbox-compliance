@@ -131,6 +131,10 @@ def _matching_package_assignments(device):
     has a value for that dimension, since comparing a nullable scope column
     to None/NULL would otherwise incorrectly match assignments scoped by a
     *different* dimension.
+
+    A row that also sets `tenant` (an optional narrowing filter, not a scope
+    field) is ANDed against the device's own tenant: it matches only if the
+    device belongs to that tenant. Rows with no tenant are unaffected.
     """
     filters = Q(device=device)
     if device.role_id:
@@ -146,9 +150,13 @@ def _matching_package_assignments(device):
     if tag_ids:
         filters |= Q(tag__in=tag_ids)
 
+    tenant_filter = Q(tenant__isnull=True)
+    if device.tenant_id:
+        tenant_filter |= Q(tenant_id=device.tenant_id)
+
     return (
         PackageAssignment.objects
-        .filter(filters, package__status=CompliancePackageStatusChoices.ACTIVE)
+        .filter(filters, tenant_filter, package__status=CompliancePackageStatusChoices.ACTIVE)
         .select_related('package')
         .distinct()
     )
@@ -798,7 +806,8 @@ def devices_matching_assignment_scope(assignment):
     direction, just inverted (assignment -> devices). Platform scope walks
     descendants (`get_descendants(include_self=True)`) so assigning to a
     parent platform also matches every child platform, not just an exact
-    match on the parent itself.
+    match on the parent itself. An assignment that also sets `tenant`
+    narrows the result to devices in that tenant (see PackageAssignment).
 
     Shared by `devices_with_effective_measures` (snapshot scoping) and the
     CompliancePackage detail view's device count -- per this module's own
@@ -812,19 +821,24 @@ def devices_matching_assignment_scope(assignment):
     """
     qs = eligible_devices_qs()
     if assignment.device_id:
-        return qs.filter(pk=assignment.device_id)
-    if assignment.device_role_id:
-        return qs.filter(role_id=assignment.device_role_id)
-    if assignment.site_id:
-        return qs.filter(site_id=assignment.site_id)
-    if assignment.site_group_id:
-        return qs.filter(site__group_id=assignment.site_group_id)
-    if assignment.platform_id:
+        matched = qs.filter(pk=assignment.device_id)
+    elif assignment.device_role_id:
+        matched = qs.filter(role_id=assignment.device_role_id)
+    elif assignment.site_id:
+        matched = qs.filter(site_id=assignment.site_id)
+    elif assignment.site_group_id:
+        matched = qs.filter(site__group_id=assignment.site_group_id)
+    elif assignment.platform_id:
         descendant_ids = assignment.platform.get_descendants(include_self=True).values_list('id', flat=True)
-        return qs.filter(platform_id__in=descendant_ids)
-    if assignment.tag_id:
-        return qs.filter(tags=assignment.tag_id)
-    return Device.objects.none()
+        matched = qs.filter(platform_id__in=descendant_ids)
+    elif assignment.tag_id:
+        matched = qs.filter(tags=assignment.tag_id)
+    else:
+        return Device.objects.none()
+
+    if assignment.tenant_id:
+        matched = matched.filter(tenant_id=assignment.tenant_id)
+    return matched
 
 
 def devices_matching_exemption_scope(exemption):

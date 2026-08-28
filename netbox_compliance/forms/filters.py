@@ -89,7 +89,10 @@ class PackageAssignmentFilterForm(NetBoxModelFilterSetForm):
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
         FieldSet('package_id', name=_('Assignment')),
-        FieldSet('device_id', 'device_role_id', 'site_id', 'site_group_id', 'platform_id', 'tag_id', name=_('Scope')),
+        FieldSet(
+            'device_id', 'device_role_id', 'site_id', 'site_group_id', 'platform_id', 'tag_id', 'tenant_id',
+            name=_('Scope'),
+        ),
     )
     package_id = DynamicModelMultipleChoiceField(
         queryset=CompliancePackage.objects.all(), required=False, label=_('Package'),
@@ -116,6 +119,9 @@ class PackageAssignmentFilterForm(NetBoxModelFilterSetForm):
     )
     tag_id = DynamicModelMultipleChoiceField(
         queryset=Tag.objects.all(), required=False, label=_('Tag'),
+    )
+    tenant_id = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'),
     )
     tag = TagFilterField(model)
 

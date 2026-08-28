@@ -91,6 +91,17 @@ class EffectiveMeasureResolutionTest(ComplianceTestMixin, TestCase):
         self.assertIn(self.package, effective['packages'])
         self.assertEqual([row.measure for row in effective['packages'][self.package]], [self.measure1])
 
+    def test_tenant_narrowed_assignment_applies_only_to_that_tenant(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='NarrowTenant', slug='narrow-tenant')
+        in_tenant = self.make_device(site=self.site, tenant=tenant)
+        out_of_tenant = self.make_device(site=self.site)
+        PackageAssignment.objects.create(package=self.package, site=self.site, tenant=tenant)
+
+        self.assertIn(self.package, get_effective_measures(in_tenant)['packages'])
+        self.assertEqual(get_effective_measures(out_of_tenant)['packages'], {})
+
     def test_retired_package_not_effective(self):
         device = self.make_device(site=self.site)
         self.package.status = CompliancePackageStatusChoices.RETIRED
@@ -299,6 +310,34 @@ class AssignmentScopeDeviceResolutionTest(ComplianceTestMixin, TestCase):
 
         self.assertEqual(matched_ids, {parent_device.pk, child_device.pk})
         self.assertNotIn(other_device.pk, matched_ids)
+
+    def test_tenant_narrowed_platform_scope_matches_only_that_tenants_devices(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='ScopeTenant', slug='scope-tenant')
+        in_tenant = self.make_device(platform=self.child_platform, tenant=tenant)
+        out_of_tenant = self.make_device(platform=self.child_platform)
+        assignment = PackageAssignment.objects.create(
+            package=self.package, platform=self.platform, tenant=tenant,
+        )
+
+        matched_ids = set(devices_matching_assignment_scope(assignment).values_list('pk', flat=True))
+
+        self.assertEqual(matched_ids, {in_tenant.pk})
+        self.assertNotIn(out_of_tenant.pk, matched_ids)
+
+    def test_tenant_narrowed_assignment_excluded_from_devices_for_package(self):
+        from tenancy.models import Tenant
+
+        tenant = Tenant.objects.create(name='DfpTenant', slug='dfp-tenant')
+        in_tenant = self.make_device(platform=self.child_platform, tenant=tenant)
+        out_of_tenant = self.make_device(platform=self.child_platform)
+        PackageAssignment.objects.create(package=self.package, platform=self.platform, tenant=tenant)
+
+        result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
+
+        self.assertEqual(result_ids, {in_tenant.pk})
+        self.assertNotIn(out_of_tenant.pk, result_ids)
 
     def test_devices_with_effective_measures_includes_child_platform_devices(self):
         child_device = self.make_device(platform=self.child_platform)
