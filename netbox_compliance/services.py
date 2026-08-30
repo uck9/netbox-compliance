@@ -132,9 +132,10 @@ def _matching_package_assignments(device):
     to None/NULL would otherwise incorrectly match assignments scoped by a
     *different* dimension.
 
-    A row that also sets `tenant` (an optional narrowing filter, not a scope
-    field) is ANDed against the device's own tenant: it matches only if the
-    device belongs to that tenant. Rows with no tenant are unaffected.
+    A row that also sets `tenants` (an optional narrowing filter, not a
+    scope field) is ANDed against the device's own tenant: it matches only
+    if the device belongs to one of those tenants. Rows with no tenants are
+    unaffected.
     """
     filters = Q(device=device)
     if device.role_id:
@@ -150,9 +151,9 @@ def _matching_package_assignments(device):
     if tag_ids:
         filters |= Q(tag__in=tag_ids)
 
-    tenant_filter = Q(tenant__isnull=True)
+    tenant_filter = Q(tenants__isnull=True)
     if device.tenant_id:
-        tenant_filter |= Q(tenant_id=device.tenant_id)
+        tenant_filter |= Q(tenants=device.tenant_id)
 
     return (
         PackageAssignment.objects
@@ -806,8 +807,9 @@ def devices_matching_assignment_scope(assignment):
     direction, just inverted (assignment -> devices). Platform scope walks
     descendants (`get_descendants(include_self=True)`) so assigning to a
     parent platform also matches every child platform, not just an exact
-    match on the parent itself. An assignment that also sets `tenant`
-    narrows the result to devices in that tenant (see PackageAssignment).
+    match on the parent itself. An assignment that also sets `tenants`
+    narrows the result to devices in one of those tenants (see
+    PackageAssignment).
 
     Shared by `devices_with_effective_measures` (snapshot scoping) and the
     CompliancePackage detail view's device count -- per this module's own
@@ -836,8 +838,9 @@ def devices_matching_assignment_scope(assignment):
     else:
         return Device.objects.none()
 
-    if assignment.tenant_id:
-        matched = matched.filter(tenant_id=assignment.tenant_id)
+    tenant_ids = list(assignment.tenants.values_list('id', flat=True))
+    if tenant_ids:
+        matched = matched.filter(tenant_id__in=tenant_ids)
     return matched
 
 

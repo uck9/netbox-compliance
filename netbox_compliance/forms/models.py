@@ -114,23 +114,31 @@ class PackageAssignmentForm(NetBoxModelForm):
     site_group = DynamicModelChoiceField(queryset=SiteGroup.objects.all(), required=False, label=_('Site Group'))
     platform = DynamicModelChoiceField(queryset=Platform.objects.all(), required=False, label=_('Platform'))
     tag = DynamicModelChoiceField(queryset=Tag.objects.all(), required=False, label=_('Tag'))
-    tenant = DynamicModelChoiceField(
-        queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'),
-        help_text=_('Optional: only devices in this tenant. Not valid with a device-scoped assignment.'),
+    tenants = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, label=_('Tenants'),
+        help_text=_('Optional: only devices in one of these tenants. Not valid with a device-scoped assignment.'),
     )
 
     fieldsets = (
         FieldSet('package', 'description', 'tags', name=_('Package Assignment')),
         FieldSet('device', 'device_role', 'site', 'site_group', 'platform', 'tag', name=_('Scope (exactly one)')),
-        FieldSet('tenant', name=_('Narrow scope (optional)')),
+        FieldSet('tenants', name=_('Narrow scope (optional)')),
     )
 
     class Meta:
         model = PackageAssignment
         fields = (
             'package', 'device', 'device_role', 'site', 'site_group',
-            'platform', 'tag', 'tenant', 'description', 'tags',
+            'platform', 'tag', 'tenants', 'description', 'tags',
         )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get('tenants') and cleaned_data.get('device'):
+            raise forms.ValidationError({
+                'tenants': _('Tenant narrowing does not apply to a device-scoped assignment.'),
+            })
+        return cleaned_data
 
 
 class PackageAssignmentBulkAssignForm(forms.Form):
@@ -148,9 +156,9 @@ class PackageAssignmentBulkAssignForm(forms.Form):
     site_group = DynamicModelMultipleChoiceField(queryset=SiteGroup.objects.all(), required=False, label=_('Site Groups'))
     platform = DynamicModelMultipleChoiceField(queryset=Platform.objects.all(), required=False, label=_('Platforms'))
     tag = DynamicModelMultipleChoiceField(queryset=Tag.objects.all(), required=False, label=_('Tags'))
-    tenant = DynamicModelChoiceField(
-        queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'),
-        help_text=_('Optional: narrow every created assignment to devices in this tenant. Not valid with device scope.'),
+    tenants = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, label=_('Tenants'),
+        help_text=_('Optional: narrow every created assignment to devices in one of these tenants. Not valid with device scope.'),
     )
     description = forms.CharField(
         required=False, widget=forms.Textarea(attrs={'rows': 3}),
@@ -160,7 +168,7 @@ class PackageAssignmentBulkAssignForm(forms.Form):
     fieldsets = (
         FieldSet('package', 'description', name=_('Package')),
         FieldSet(*SCOPE_FIELDS, name=_('Scope (select values in exactly one field)')),
-        FieldSet('tenant', name=_('Narrow scope (optional)')),
+        FieldSet('tenants', name=_('Narrow scope (optional)')),
     )
 
     def clean(self):
@@ -176,7 +184,7 @@ class PackageAssignmentBulkAssignForm(forms.Form):
                 % {'fields': ', '.join(filled_fields)}
             )
         cleaned_data['scope_field'] = filled_fields[0]
-        if cleaned_data.get('tenant') and filled_fields[0] == 'device':
+        if cleaned_data.get('tenants') and filled_fields[0] == 'device':
             raise forms.ValidationError(
                 _('Tenant narrowing does not apply to a device-scoped assignment.')
             )

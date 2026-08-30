@@ -4,7 +4,7 @@ from django.urls import reverse
 from rest_framework import status
 
 from ..choices import ComplianceMeasureCategoryChoices, ComplianceMeasureResultTypeChoices, ComplianceMeasureSeverityChoices
-from ..models import ComplianceResult, ComplianceResultHistory, MeasureAssignment
+from ..models import ComplianceResult, ComplianceResultHistory, MeasureAssignment, PackageAssignment
 from ..models import ComplianceMeasure
 from .base import ComplianceTestMixin
 from .custom import APITestCase
@@ -463,3 +463,67 @@ class DeviceEffectiveMeasuresAPITest(ComplianceTestMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         row = response.data['measures'][0]
         self.assertEqual(row['pass_threshold'], 90.0)
+
+
+class PackageAssignmentTenantsAPITest(ComplianceTestMixin, APITestCase):
+    model = PackageAssignment
+    user_permissions = (
+        'netbox_compliance.view_packageassignment',
+        'netbox_compliance.add_packageassignment',
+    )
+
+    def setUp(self):
+        super().setUp()
+        from tenancy.models import Tenant
+
+        from ..models import CompliancePackage
+        from ..choices import CompliancePackageStatusChoices
+
+        self.package = CompliancePackage.objects.create(
+            name='ApiPkg', slug='apipkg', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+        self.tenant_a = Tenant.objects.create(name='ApiTenantA', slug='api-tenant-a')
+        self.tenant_b = Tenant.objects.create(name='ApiTenantB', slug='api-tenant-b')
+
+    def test_create_and_read_back_multiple_tenants(self):
+        response = self.client.post(
+            self._get_list_url(),
+            {
+                'package': self.package.pk,
+                'site': self.site.pk,
+                'tenants': [self.tenant_a.pk, self.tenant_b.pk],
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(set(response.data['tenants']), {self.tenant_a.pk, self.tenant_b.pk})
+
+        assignment = PackageAssignment.objects.get(pk=response.data['id'])
+        self.assertEqual(
+            set(assignment.tenants.values_list('pk', flat=True)),
+            {self.tenant_a.pk, self.tenant_b.pk},
+        )
+
+        detail = self.client.get(self._get_detail_url(assignment), **self.header)
+        self.assertEqual(
+            set(detail.data['tenant_names']),
+            {self.tenant_a.name, self.tenant_b.name},
+        )
+
+    def test_tenants_with_device_scope_is_rejected(self):
+        device = self.make_device(site=self.site)
+        response = self.client.post(
+            self._get_list_url(),
+            {
+                'package': self.package.pk,
+                'device': device.pk,
+                'tenants': [self.tenant_a.pk],
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+        self.assertIn('tenants', response.data)

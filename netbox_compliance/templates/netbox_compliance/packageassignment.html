@@ -20,7 +20,7 @@
               {% if object.site_group %}Site Group: <a href="{{ object.site_group.get_absolute_url }}">{{ object.site_group }}</a>{% endif %}
               {% if object.platform %}Platform: <a href="{{ object.platform.get_absolute_url }}">{{ object.platform }}</a>{% endif %}
               {% if object.tag %}Tag: {% badge object.tag %}{% endif %}
-              {% if object.tenant %}<br><span class="text-muted">narrowed to tenant:</span> <a href="{{ object.tenant.get_absolute_url }}">{{ object.tenant }}</a>{% endif %}
+              {% with narrowed_tenants=object.tenants.all %}{% if narrowed_tenants %}<br><span class="text-muted">narrowed to tenants:</span> {% for tenant in narrowed_tenants %}<a href="{{ tenant.get_absolute_url }}">{{ tenant }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}{% endwith %}
             </td>
           </tr>
           <tr>

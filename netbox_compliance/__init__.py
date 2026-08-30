@@ -104,6 +104,25 @@ class NetBoxComplianceConfig(PluginConfig):
             dispatch_uid='compliance_evaluate_software_version_on_change',
         )
 
+    def register_package_assignment_tenant_guard(self) -> None:
+        """
+        Enforce "tenant narrowing is not valid with a device scope" on
+        PackageAssignment.tenants at the m2m level, so a direct shell or
+        admin write can't create the combination the forms and API
+        serializer already reject. Same module-level-receiver weak-reference
+        caveat as the other signals here.
+        """
+        from django.db.models.signals import m2m_changed
+
+        from .models import PackageAssignment
+        from .signals import guard_package_assignment_tenant_narrowing
+
+        m2m_changed.connect(
+            guard_package_assignment_tenant_narrowing,
+            sender=PackageAssignment.tenants.through,
+            dispatch_uid='compliance_package_assignment_tenant_guard',
+        )
+
     def register_result_cache_invalidation(self) -> None:
         """
         Invalidate the device-page compliance panel cache (services.py's
@@ -163,6 +182,7 @@ class NetBoxComplianceConfig(PluginConfig):
         self.register_device_compliance_tab()
         self.register_device_compliance_export()
         self.register_software_version_evaluation()
+        self.register_package_assignment_tenant_guard()
         self.register_result_cache_invalidation()
         self.register_result_history_logging()
 

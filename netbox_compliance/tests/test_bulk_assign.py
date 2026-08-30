@@ -42,14 +42,15 @@ class PackageAssignmentBulkAssignFormTest(ComplianceTestMixin, TestCase):
     def test_tenant_narrowing_with_non_device_scope_is_valid(self):
         from tenancy.models import Tenant
 
-        tenant = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        tenant1 = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        tenant2 = Tenant.objects.create(name='Tenant2', slug='tenant2')
         form = PackageAssignmentBulkAssignForm(data={
             'package': self.package.pk,
             'platform': [self.platform.pk],
-            'tenant': tenant.pk,
+            'tenants': [tenant1.pk, tenant2.pk],
         })
         self.assertTrue(form.is_valid())
-        self.assertEqual(form.cleaned_data['tenant'], tenant)
+        self.assertEqual(set(form.cleaned_data['tenants']), {tenant1, tenant2})
 
     def test_tenant_narrowing_with_device_scope_is_invalid(self):
         from tenancy.models import Tenant
@@ -59,7 +60,7 @@ class PackageAssignmentBulkAssignFormTest(ComplianceTestMixin, TestCase):
         form = PackageAssignmentBulkAssignForm(data={
             'package': self.package.pk,
             'device': [device.pk],
-            'tenant': tenant.pk,
+            'tenants': [tenant.pk],
         })
         self.assertFalse(form.is_valid())
 
@@ -94,17 +95,21 @@ class PackageAssignmentBulkAssignViewTest(ComplianceTestMixin, TestCase):
     def test_post_applies_tenant_narrowing_to_every_created_row(self):
         from tenancy.models import Tenant
 
-        tenant = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        tenant1 = Tenant.objects.create(name='Tenant1', slug='tenant1')
+        tenant2 = Tenant.objects.create(name='Tenant2', slug='tenant2')
         response = self.client.post(reverse('plugins:netbox_compliance:packageassignment_bulk_assign'), data={
             'package': self.package.pk,
             'platform': [self.platform.pk, self.platform2.pk],
-            'tenant': tenant.pk,
+            'tenants': [tenant1.pk, tenant2.pk],
         })
 
         self.assertEqual(response.status_code, 302)
         assignments = PackageAssignment.objects.filter(package=self.package)
         self.assertEqual(assignments.count(), 2)
-        self.assertTrue(all(a.tenant_id == tenant.pk for a in assignments))
+        self.assertTrue(all(
+            set(a.tenants.values_list('pk', flat=True)) == {tenant1.pk, tenant2.pk}
+            for a in assignments
+        ))
 
     def test_post_skips_already_existing_assignment(self):
         PackageAssignment.objects.create(package=self.package, platform=self.platform)

@@ -36,8 +36,8 @@ __all__ = (
 @register_model_view(models.PackageAssignment, 'list', path='', detail=False)
 class PackageAssignmentListView(ObjectListView):
     queryset = models.PackageAssignment.objects.select_related(
-        'package', 'device', 'device_role', 'site', 'site_group', 'platform', 'tag', 'tenant',
-    )
+        'package', 'device', 'device_role', 'site', 'site_group', 'platform', 'tag',
+    ).prefetch_related('tenants')
     table = tables.PackageAssignmentTable
     filterset = filtersets.PackageAssignmentFilterSet
     filterset_form = forms.PackageAssignmentFilterForm
@@ -90,17 +90,19 @@ class PackageAssignmentBulkAssignView(ObjectPermissionRequiredMixin, View):
 
         package = form.cleaned_data['package']
         description = form.cleaned_data['description']
-        tenant = form.cleaned_data.get('tenant')
+        tenants = form.cleaned_data.get('tenants')
         scope_field = form.cleaned_data['scope_field']
         values = form.cleaned_data[scope_field]
 
         created, skipped = 0, 0
         for value in values:
-            _, was_created = models.PackageAssignment.objects.get_or_create(
-                package=package, tenant=tenant, **{scope_field: value},
+            assignment, was_created = models.PackageAssignment.objects.get_or_create(
+                package=package, **{scope_field: value},
                 defaults={'description': description},
             )
             if was_created:
+                if tenants:
+                    assignment.tenants.set(tenants)
                 created += 1
             else:
                 skipped += 1

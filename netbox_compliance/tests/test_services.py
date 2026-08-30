@@ -95,12 +95,29 @@ class EffectiveMeasureResolutionTest(ComplianceTestMixin, TestCase):
         from tenancy.models import Tenant
 
         tenant = Tenant.objects.create(name='NarrowTenant', slug='narrow-tenant')
+        other_tenant = Tenant.objects.create(name='OtherNarrowTenant', slug='other-narrow-tenant')
         in_tenant = self.make_device(site=self.site, tenant=tenant)
         out_of_tenant = self.make_device(site=self.site)
-        PackageAssignment.objects.create(package=self.package, site=self.site, tenant=tenant)
+        assignment = PackageAssignment.objects.create(package=self.package, site=self.site)
+        assignment.tenants.set([tenant, other_tenant])
 
         self.assertIn(self.package, get_effective_measures(in_tenant)['packages'])
         self.assertEqual(get_effective_measures(out_of_tenant)['packages'], {})
+
+    def test_assignment_narrowed_to_several_tenants_matches_any_of_them(self):
+        from tenancy.models import Tenant
+
+        tenant_a = Tenant.objects.create(name='TenantA', slug='tenant-a')
+        tenant_b = Tenant.objects.create(name='TenantB', slug='tenant-b')
+        device_a = self.make_device(site=self.site, tenant=tenant_a)
+        device_b = self.make_device(site=self.site, tenant=tenant_b)
+        device_c = self.make_device(site=self.site, tenant=Tenant.objects.create(name='TenantC', slug='tenant-c'))
+        assignment = PackageAssignment.objects.create(package=self.package, site=self.site)
+        assignment.tenants.set([tenant_a, tenant_b])
+
+        self.assertIn(self.package, get_effective_measures(device_a)['packages'])
+        self.assertIn(self.package, get_effective_measures(device_b)['packages'])
+        self.assertEqual(get_effective_measures(device_c)['packages'], {})
 
     def test_retired_package_not_effective(self):
         device = self.make_device(site=self.site)
@@ -318,8 +335,9 @@ class AssignmentScopeDeviceResolutionTest(ComplianceTestMixin, TestCase):
         in_tenant = self.make_device(platform=self.child_platform, tenant=tenant)
         out_of_tenant = self.make_device(platform=self.child_platform)
         assignment = PackageAssignment.objects.create(
-            package=self.package, platform=self.platform, tenant=tenant,
+            package=self.package, platform=self.platform,
         )
+        assignment.tenants.add(tenant)
 
         matched_ids = set(devices_matching_assignment_scope(assignment).values_list('pk', flat=True))
 
@@ -332,7 +350,8 @@ class AssignmentScopeDeviceResolutionTest(ComplianceTestMixin, TestCase):
         tenant = Tenant.objects.create(name='DfpTenant', slug='dfp-tenant')
         in_tenant = self.make_device(platform=self.child_platform, tenant=tenant)
         out_of_tenant = self.make_device(platform=self.child_platform)
-        PackageAssignment.objects.create(package=self.package, platform=self.platform, tenant=tenant)
+        assignment = PackageAssignment.objects.create(package=self.package, platform=self.platform)
+        assignment.tenants.add(tenant)
 
         result_ids = set(devices_for_package(self.package).values_list('pk', flat=True))
 

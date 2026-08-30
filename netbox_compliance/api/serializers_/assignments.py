@@ -27,18 +27,27 @@ class PackageAssignmentSerializer(NetBoxModelSerializer):
     platform_name = serializers.SerializerMethodField()
     tag = serializers.PrimaryKeyRelatedField(queryset=Tag.objects.all(), required=False, allow_null=True)
     tag_name = serializers.SerializerMethodField()
-    tenant = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all(), required=False, allow_null=True)
-    tenant_name = serializers.SerializerMethodField()
+    tenants = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all(), many=True, required=False)
+    tenant_names = serializers.SerializerMethodField()
 
     class Meta:
         model = PackageAssignment
         fields = (
             'id', 'url', 'display', 'package', 'package_name', 'device', 'device_name',
             'device_role', 'device_role_name', 'site', 'site_name', 'site_group', 'site_group_name',
-            'platform', 'platform_name', 'tag', 'tag_name', 'tenant', 'tenant_name',
+            'platform', 'platform_name', 'tag', 'tag_name', 'tenants', 'tenant_names',
             'description', 'tags', 'custom_fields', 'created', 'last_updated',
         )
         brief_fields = ('id', 'url', 'display', 'package', 'package_name')
+
+    def validate(self, data):
+        data = super().validate(data)
+        device = data.get('device', getattr(self.instance, 'device', None))
+        if data.get('tenants') and device:
+            raise serializers.ValidationError({
+                'tenants': 'Tenant narrowing does not apply to a device-scoped assignment.',
+            })
+        return data
 
     def get_device_name(self, obj):
         return obj.device.name if obj.device else None
@@ -58,8 +67,8 @@ class PackageAssignmentSerializer(NetBoxModelSerializer):
     def get_tag_name(self, obj):
         return obj.tag.name if obj.tag else None
 
-    def get_tenant_name(self, obj):
-        return obj.tenant.name if obj.tenant else None
+    def get_tenant_names(self, obj):
+        return [tenant.name for tenant in obj.tenants.all()]
 
 
 class MeasureAssignmentSerializer(NetBoxModelSerializer):
