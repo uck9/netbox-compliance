@@ -9,8 +9,15 @@ from ..choices import (
     ComplianceMeasureCategoryChoices,
     ComplianceMeasureSeverityChoices,
     ComplianceResultStatusChoices,
+    EffectiveStatusChoices,
 )
-from ..models import ComplianceMeasure, ComplianceResult, ComplianceSnapshot, MeasureAssignment
+from ..models import (
+    ComplianceMeasure,
+    ComplianceResult,
+    ComplianceSnapshot,
+    ComplianceSnapshotMeasureResult,
+    MeasureAssignment,
+)
 from ..services import generate_snapshots_for_period
 from .base import ComplianceTestMixin
 
@@ -85,3 +92,67 @@ class SnapshotIdempotencyTest(ComplianceTestMixin, TestCase):
         snapshot = ComplianceSnapshot.objects.get(period=period)
         self.assertEqual(snapshot.device_name, str(device))
         self.assertTrue(snapshot.device_name)
+
+    def test_snapshot_denormalizes_site_and_role_as_of_generation(self):
+        device = self.make_device(site=self.site2, role=self.device_role2)
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+        ComplianceResult.objects.create(
+            device=device, measure=self.measure, status=ComplianceResultStatusChoices.PASS,
+            timestamp=timezone.now(), source='test',
+        )
+        period = date(2026, 6, 1)
+
+        generate_snapshots_for_period(period)
+
+        snapshot = ComplianceSnapshot.objects.get(period=period)
+        self.assertEqual(snapshot.site, self.site2)
+        self.assertEqual(snapshot.site_name, str(self.site2))
+        self.assertEqual(snapshot.role, self.device_role2)
+        self.assertEqual(snapshot.role_name, str(self.device_role2))
+
+        # Moving the device afterwards must not rewrite the already-generated snapshot --
+        # it's a frozen point-in-time record, same guarantee as device_name/data.
+        device.site = self.site
+        device.role = self.device_role
+        device.save()
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.site, self.site2)
+        self.assertEqual(snapshot.role, self.device_role2)
+
+    def test_snapshot_writes_one_measure_result_row_per_effective_measure(self):
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=3)
+        ComplianceResult.objects.create(
+            device=device, measure=self.measure, status=ComplianceResultStatusChoices.FAIL,
+            timestamp=timezone.now(), source='test',
+        )
+        period = date(2026, 6, 1)
+
+        generate_snapshots_for_period(period)
+
+        snapshot = ComplianceSnapshot.objects.get(period=period)
+        result = ComplianceSnapshotMeasureResult.objects.get(snapshot=snapshot)
+        self.assertEqual(result.measure, self.measure.slug)
+        self.assertEqual(result.measure_name, self.measure.name)
+        self.assertEqual(result.package, '')  # direct assignment, no package
+        self.assertEqual(result.status, EffectiveStatusChoices.FAIL)
+        self.assertEqual(result.weight, 3)
+        self.assertTrue(result.required)
+
+    def test_regenerating_a_period_replaces_measure_result_rows_too(self):
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+        ComplianceResult.objects.create(
+            device=device, measure=self.measure, status=ComplianceResultStatusChoices.PASS,
+            timestamp=timezone.now(), source='test',
+        )
+        period = date(2026, 6, 1)
+
+        generate_snapshots_for_period(period)
+        first_snapshot_id = ComplianceSnapshot.objects.get(period=period).pk
+
+        generate_snapshots_for_period(period)
+
+        self.assertEqual(ComplianceSnapshotMeasureResult.objects.filter(snapshot_id=first_snapshot_id).count(), 0)
+        new_snapshot = ComplianceSnapshot.objects.get(period=period)
+        self.assertEqual(ComplianceSnapshotMeasureResult.objects.filter(snapshot=new_snapshot).count(), 1)

@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.core.cache import cache
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.template import Context, Template
 from django.utils import timezone
 
@@ -933,6 +933,48 @@ def devices_with_effective_measures():
     return eligible_devices_qs().filter(pk__in=device_ids)
 
 
+def snapshot_measure_result_objects(snapshot, data):
+    """
+    Build (unsaved) ComplianceSnapshotMeasureResult rows for one snapshot's
+    frozen `data` -- one per package measure plus one per direct measure.
+    Shared by generate_snapshots_for_period and the
+    backfill_snapshot_measure_results management command (which derives
+    these rows from a pre-existing snapshot's `data` instead of recomputing
+    scoring for a past period).
+    """
+    from .models import ComplianceSnapshotMeasureResult
+
+    rows = []
+    for package in data['packages']:
+        for measure_row in package['measures']:
+            rows.append(ComplianceSnapshotMeasureResult(
+                snapshot=snapshot,
+                measure=measure_row['measure'],
+                measure_name=measure_row['measure_name'],
+                package=package['package'],
+                package_name=package['package_name'],
+                severity=measure_row['severity'],
+                status=measure_row['status'],
+                required=measure_row['required'],
+                weight=measure_row['weight'],
+                credit=measure_row['credit'],
+            ))
+    for measure_row in data['direct_measures']:
+        rows.append(ComplianceSnapshotMeasureResult(
+            snapshot=snapshot,
+            measure=measure_row['measure'],
+            measure_name=measure_row['measure_name'],
+            package='',
+            package_name='',
+            severity=measure_row['severity'],
+            status=measure_row['status'],
+            required=measure_row['required'],
+            weight=measure_row['weight'],
+            credit=measure_row['credit'],
+        ))
+    return rows
+
+
 def generate_snapshots_for_period(period):
     """
     Idempotent: replaces any existing snapshots for this period. Snapshots
@@ -940,25 +982,154 @@ def generate_snapshots_for_period(period):
     Returns the number of snapshots written. Shared by the monthly system
     job and the `generate_compliance_snapshots` management command.
     """
-    from .models import ComplianceSnapshot
+    from .models import ComplianceSnapshot, ComplianceSnapshotMeasureResult
 
     ComplianceSnapshot.objects.filter(period=period).delete()
 
     count = 0
-    for device in devices_with_effective_measures():
+    for device in devices_with_effective_measures().select_related('site', 'role'):
         data, overall_score, compliant = build_snapshot_data(device)
         if not data['packages'] and not data['direct_measures']:
             continue
-        ComplianceSnapshot.objects.create(
+        snapshot = ComplianceSnapshot.objects.create(
             device=device,
             device_name=str(device),
+            site=device.site,
+            site_name=str(device.site) if device.site else '',
+            role=device.role,
+            role_name=str(device.role) if device.role else '',
             period=period,
             overall_score=overall_score,
             compliant=compliant,
             data=data,
         )
+        ComplianceSnapshotMeasureResult.objects.bulk_create(
+            snapshot_measure_result_objects(snapshot, data)
+        )
         count += 1
     return count
+
+
+# Report-only display thresholds for coloring a per-measure adherence cell --
+# distinct from CompliancePackage.amber_threshold, which drives scoring/
+# traffic-light for packages, not measure-trend display.
+TREND_GREEN_THRESHOLD = 95
+TREND_AMBER_THRESHOLD = 80
+
+
+def _trend_color(pct):
+    if pct is None:
+        return 'grey'
+    if pct >= TREND_GREEN_THRESHOLD:
+        return 'green'
+    if pct >= TREND_AMBER_THRESHOLD:
+        return 'amber'
+    return 'red'
+
+
+def measure_adherence_matrix(*, site_id=None, role_id=None, package=None, periods=None):
+    """
+    Fleet-wide (or site/role-scoped) per-measure pass-rate-over-time, built
+    from ComplianceSnapshotMeasureResult (see that model's docstring for why
+    a side table exists instead of parsing every ComplianceSnapshot.data).
+
+    Returns (periods, measure_rows) where periods is sorted oldest-first and
+    measure_rows is a list of
+    {measure, measure_name, package_name, cells: [{period, total, pct, color}, ...]}
+    with one cell per period in the same order as `periods`. `total`/`pct`
+    exclude not_applicable results and count pass/exempt as adherent --
+    mirroring score_group's own scoring exclusions -- so `pct` is None (grey)
+    when a measure had zero eligible results that period (not assigned yet,
+    or fully exempted).
+    """
+    from .models import ComplianceSnapshot, ComplianceSnapshotMeasureResult
+
+    if periods is None:
+        periods = list(
+            ComplianceSnapshot.objects.order_by('period').values_list('period', flat=True).distinct()
+        )
+    else:
+        periods = sorted(periods)
+    period_index = {p: i for i, p in enumerate(periods)}
+
+    qs = ComplianceSnapshotMeasureResult.objects.filter(
+        required=True, snapshot__period__in=periods,
+    ).exclude(status=EffectiveStatusChoices.NOT_APPLICABLE)
+    if site_id:
+        qs = qs.filter(snapshot__site_id=site_id)
+    if role_id:
+        qs = qs.filter(snapshot__role_id=role_id)
+    if package:
+        qs = qs.filter(package=package)
+
+    aggregated = qs.values('measure', 'measure_name', 'package_name', 'snapshot__period').annotate(
+        total=Count('id'),
+        passing=Count('id', filter=Q(status__in=(EffectiveStatusChoices.PASS, EffectiveStatusChoices.EXEMPT))),
+    )
+
+    measures = {}
+    for row in aggregated:
+        info = measures.setdefault(row['measure'], {
+            'measure': row['measure'],
+            'measure_name': row['measure_name'],
+            'package_name': row['package_name'],
+            'cells': [{'period': p, 'total': 0, 'pct': None, 'color': 'grey'} for p in periods],
+        })
+        total, passing = row['total'], row['passing']
+        pct = round(100 * passing / total, 1) if total else None
+        info['cells'][period_index[row['snapshot__period']]] = {
+            'period': row['snapshot__period'],
+            'total': total,
+            'pct': pct,
+            'color': _trend_color(pct),
+        }
+
+    measure_rows = sorted(measures.values(), key=lambda m: (m['package_name'], m['measure_name']))
+    return periods, measure_rows
+
+
+def overall_compliance_trend(*, site_id=None, role_id=None, periods=None):
+    """
+    Fleet-wide (or site/role-scoped) %-of-devices-fully-compliant per
+    period, read directly from ComplianceSnapshot.compliant -- the headline
+    number to show alongside measure_adherence_matrix's per-measure detail.
+    """
+    from .models import ComplianceSnapshot
+
+    if periods is None:
+        periods = list(
+            ComplianceSnapshot.objects.order_by('period').values_list('period', flat=True).distinct()
+        )
+    else:
+        periods = sorted(periods)
+
+    qs = ComplianceSnapshot.objects.filter(period__in=periods)
+    if site_id:
+        qs = qs.filter(site_id=site_id)
+    if role_id:
+        qs = qs.filter(role_id=role_id)
+
+    aggregated = {
+        row['period']: row
+        for row in qs.values('period').annotate(
+            total=Count('id'),
+            compliant_count=Count('id', filter=Q(compliant=True)),
+        )
+    }
+
+    rows = []
+    for period in periods:
+        row = aggregated.get(period, {'total': 0, 'compliant_count': 0})
+        total, compliant_count = row['total'], row['compliant_count']
+        pct = round(100 * compliant_count / total, 1) if total else None
+        rows.append({
+            'period': period,
+            'total': total,
+            'compliant_count': compliant_count,
+            'pct': pct,
+            'color': _trend_color(pct),
+        })
+    return rows
 
 
 def get_device_panel_data(device):

@@ -137,6 +137,11 @@ results_items = (
         link_text='Package & Test Status Report',
         permissions=['netbox_compliance.view_complianceresult'],
     ),
+    PluginMenuItem(
+        link='plugins:netbox_compliance:measure_trend_report',
+        link_text='Measure Adherence Trend',
+        permissions=['netbox_compliance.view_compliancesnapshot'],
+    ),
 )
 
 menu = PluginMenu(

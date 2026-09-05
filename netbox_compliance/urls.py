@@ -55,4 +55,7 @@ urlpatterns = [
 
     # Package / test status report
     path('reports/status/', views.PackageTestStatusReportView.as_view(), name='status_report'),
+
+    # Measure adherence trend report
+    path('reports/trend/', views.MeasureAdherenceTrendView.as_view(), name='measure_trend_report'),
 ]

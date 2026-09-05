@@ -7,8 +7,15 @@ from django.test import TestCase
 from django.utils import timezone
 
 from ..choices import ComplianceMeasureCategoryChoices, ComplianceMeasureResultTypeChoices, ComplianceMeasureSeverityChoices
-from ..models import ComplianceMeasure, ComplianceResult, ComplianceResultHistory, ComplianceSnapshot
-from ..services import record_result
+from ..models import (
+    ComplianceMeasure,
+    ComplianceResult,
+    ComplianceResultHistory,
+    ComplianceSnapshot,
+    ComplianceSnapshotMeasureResult,
+    MeasureAssignment,
+)
+from ..services import build_snapshot_data, record_result
 from .base import ComplianceTestMixin
 
 VALUE_MAP = {
@@ -180,3 +187,92 @@ class PruneComplianceResultsTest(ComplianceTestMixin, TestCase):
         self._call('--keep-days', '90')
 
         self.assertEqual(ComplianceResult.objects.count(), 1)
+
+
+class BackfillSnapshotMeasureResultsTest(ComplianceTestMixin, TestCase):
+    """backfill_snapshot_measure_results -- one-off fixup for ComplianceSnapshot rows
+    written before site/role/ComplianceSnapshotMeasureResult existed, deriving both
+    from data already on hand (the snapshot's device, and its frozen `data`) rather
+    than recomputing scoring for a past period."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.measure = ComplianceMeasure.objects.create(
+            name='Measure1', slug='measure1',
+            category=ComplianceMeasureCategoryChoices.OPERATIONAL,
+            severity=ComplianceMeasureSeverityChoices.LOW,
+        )
+
+    def _call(self, *args, **kwargs):
+        out = StringIO()
+        kwargs.setdefault('stdout', out)
+        call_command('backfill_snapshot_measure_results', *args, **kwargs)
+        return out.getvalue()
+
+    def _pre_backfill_snapshot(self, device):
+        """Build a snapshot the way generate_snapshots_for_period did before this
+        feature existed: real `data`, but no site/role and no measure_results rows.
+        Caller must assign self.measure to `device` first so it resolves as effective."""
+        data, overall_score, compliant = build_snapshot_data(device)
+        return ComplianceSnapshot.objects.create(
+            device=device, device_name=device.name, period=date(2026, 5, 1),
+            overall_score=overall_score, compliant=compliant, data=data,
+        )
+
+    def test_backfills_site_role_and_measure_results(self):
+        device = self.make_device(site=self.site2, role=self.device_role2)
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        snapshot = self._pre_backfill_snapshot(device)
+        self.assertIsNone(snapshot.site)
+        self.assertEqual(ComplianceSnapshotMeasureResult.objects.filter(snapshot=snapshot).count(), 0)
+
+        output = self._call()
+
+        self.assertIn('Updated site/role on 1 snapshot', output)
+        self.assertIn('created 1 measure result row', output)
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.site, self.site2)
+        self.assertEqual(snapshot.role, self.device_role2)
+        result = ComplianceSnapshotMeasureResult.objects.get(snapshot=snapshot)
+        self.assertEqual(result.measure, 'measure1')
+
+    def test_is_idempotent(self):
+        device = self.make_device(site=self.site2)
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        self._pre_backfill_snapshot(device)
+
+        self._call()
+        second_output = self._call()
+
+        self.assertIn('Updated site/role on 0 snapshot', second_output)
+        self.assertIn('created 0 measure result row', second_output)
+
+    def test_dry_run_writes_nothing(self):
+        device = self.make_device(site=self.site2)
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        snapshot = self._pre_backfill_snapshot(device)
+
+        output = self._call('--dry-run')
+
+        self.assertIn('Would update site/role on 1 snapshot', output)
+        snapshot.refresh_from_db()
+        self.assertIsNone(snapshot.site)
+        self.assertEqual(ComplianceSnapshotMeasureResult.objects.filter(snapshot=snapshot).count(), 0)
+
+    def test_device_since_deleted_is_skipped_for_site_role_but_still_gets_measure_results(self):
+        device = self.make_device(site=self.site2)
+        MeasureAssignment.objects.create(device=device, measure=self.measure, weight=1)
+        record_result(device, self.measure, status='pass', value='true', source='test')
+        snapshot = self._pre_backfill_snapshot(device)
+        device.delete()  # ComplianceSnapshot.device is SET_NULL
+        snapshot.refresh_from_db()
+        self.assertIsNone(snapshot.device_id)
+
+        output = self._call()
+
+        self.assertIn('Updated site/role on 0 snapshot', output)
+        self.assertEqual(ComplianceSnapshotMeasureResult.objects.filter(snapshot=snapshot).count(), 1)
