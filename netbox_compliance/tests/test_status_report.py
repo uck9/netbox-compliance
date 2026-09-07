@@ -118,6 +118,15 @@ class StatusReportViewTest(ComplianceTestMixin, TestCase):
         self.assertContains(response, 'cr-site-score')
         self.assertContains(response, '50%')
 
+    def test_unevaluated_device_shows_no_results_not_no_failures(self):
+        # Package assigned, but the device has zero ComplianceResults -> pending.
+        self.make_device(site=self.site)
+
+        response = self.client.get(self._url(report='by_package', submitted='1'))
+
+        self.assertContains(response, 'no results yet')
+        self.assertNotContains(response, 'no failing tests')
+
     def test_passing_device_shows_no_failing_tests(self):
         device = self.make_device(site=self.site)
         ComplianceResult.objects.create(

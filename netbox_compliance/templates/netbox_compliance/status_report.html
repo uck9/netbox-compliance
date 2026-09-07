@@ -91,6 +91,7 @@
   .cr-cnt-low { background: var(--tblr-blue, #066fd1); }
   .cr-cnt-informational { background: transparent; color: var(--cr-muted); border-color: var(--cr-muted); }
   .cr-clean { font-family: var(--cr-mono); font-size: .72rem; color: var(--tblr-success, #2fb344); white-space: nowrap; }
+  .cr-pending { font-family: var(--cr-mono); font-size: .72rem; color: var(--cr-muted); white-space: nowrap; }
 
   .cr-score, .cr-val { font-family: var(--cr-mono); font-size: .78rem; text-align: right; white-space: nowrap; justify-self: end; }
   .cr-val { color: var(--cr-muted); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -207,7 +208,13 @@
 <div class="cr-site">
   <div class="cr-site-head">
     <h3>{% if site_entry.site %}<a href="{{ site_entry.site.get_absolute_url }}">{{ site_entry.site.name }}</a>{% else %}{% trans "No site" %}{% endif %}</h3>
-    {% if site_entry.score is not None %}<span class="cr-site-score" title="{% trans 'Weighted score across every listed test at this site' %}">{{ site_entry.score|floatformat:0 }}%</span>{% endif %}
+    {% if site_entry.score is not None %}
+      {% if site_entry.evaluated %}
+        <span class="cr-site-score" title="{% trans 'Weighted score across every listed test at this site' %}">{{ site_entry.score|floatformat:0 }}%</span>
+      {% else %}
+        <span class="cr-site-score" title="{% trans 'No results yet for any listed test at this site' %}">&mdash;</span>
+      {% endif %}
+    {% endif %}
     <span class="cr-spacer"></span>
     <span class="badge text-bg-light">{{ site_entry.device_count }} {% trans "device" %}{{ site_entry.device_count|pluralize }}</span>
     {% if site_entry.noncompliant_count %}<span class="badge text-bg-danger">{{ site_entry.noncompliant_count }} {% trans "non-compliant" %}</span>{% endif %}
@@ -228,10 +235,12 @@
         <span class="cr-counters">
           {% for c in entry.counters %}<span class="cr-cnt cr-cnt-{{ c.severity }}" title="{{ c.label }}">{{ c.count }} {{ c.short }}</span>{% endfor %}
         </span>
-      {% else %}
+      {% elif entry.evaluated %}
         <span class="cr-counters"><span class="cr-clean"><i class="mdi mdi-check"></i> {% trans "no failing tests" %}</span></span>
+      {% else %}
+        <span class="cr-counters"><span class="cr-pending"><i class="mdi mdi-timer-sand-empty"></i> {% trans "no results yet" %}</span></span>
       {% endif %}
-      <span class="cr-score cr-{{ entry.score_color }}" title="{% trans 'Overall device score' %}">{{ entry.score|floatformat:0 }}%</span>
+      <span class="cr-score cr-{{ entry.score_color }}" title="{% trans 'Overall device score' %}">{% if entry.evaluated %}{{ entry.score|floatformat:0 }}%{% else %}&mdash;{% endif %}</span>
     </div>
     <ul class="cr-sub">
       {% for row in entry.rows %}
@@ -243,7 +252,7 @@
         <span class="cr-counters">
           {% for c in row.counters %}<span class="cr-cnt cr-cnt-{{ c.severity }}" title="{{ c.label }}">{{ c.count }} {{ c.short }}</span>{% endfor %}
         </span>
-        <span class="cr-val">{{ row.score|floatformat:0 }}%</span>
+        <span class="cr-val">{% if row.evaluated %}{{ row.score|floatformat:0 }}%{% else %}&mdash;{% endif %}</span>
       </li>
       {% endfor %}
     </ul>
@@ -274,7 +283,13 @@
 <div class="cr-site">
   <div class="cr-site-head">
     <h3>{% if site_entry.site %}<a href="{{ site_entry.site.get_absolute_url }}">{{ site_entry.site.name }}</a>{% else %}{% trans "No site" %}{% endif %}</h3>
-    {% if site_entry.score is not None %}<span class="cr-site-score" title="{% trans 'Weighted score across every listed test at this site' %}">{{ site_entry.score|floatformat:0 }}%</span>{% endif %}
+    {% if site_entry.score is not None %}
+      {% if site_entry.evaluated %}
+        <span class="cr-site-score" title="{% trans 'Weighted score across every listed test at this site' %}">{{ site_entry.score|floatformat:0 }}%</span>
+      {% else %}
+        <span class="cr-site-score" title="{% trans 'No results yet for any listed test at this site' %}">&mdash;</span>
+      {% endif %}
+    {% endif %}
     <span class="cr-spacer"></span>
     <span class="badge text-bg-light">{{ site_entry.device_count }} {% trans "device" %}{{ site_entry.device_count|pluralize }}</span>
     {% if site_entry.failing_test_count %}<span class="badge text-bg-danger">{{ site_entry.failing_test_count }} {% trans "failing test" %}{{ site_entry.failing_test_count|pluralize }}</span>{% endif %}
@@ -295,10 +310,12 @@
         <span class="cr-counters">
           {% for c in entry.counters %}<span class="cr-cnt cr-cnt-{{ c.severity }}" title="{{ c.label }}">{{ c.count }} {{ c.short }}</span>{% endfor %}
         </span>
-      {% else %}
+      {% elif entry.evaluated %}
         <span class="cr-counters"><span class="cr-clean"><i class="mdi mdi-check"></i> {% trans "no failing tests" %}</span></span>
+      {% else %}
+        <span class="cr-counters"><span class="cr-pending"><i class="mdi mdi-timer-sand-empty"></i> {% trans "no results yet" %}</span></span>
       {% endif %}
-      <span class="cr-score cr-{{ entry.score_color }}" title="{% trans 'Overall device score' %}">{{ entry.score|floatformat:0 }}%</span>
+      <span class="cr-score cr-{{ entry.score_color }}" title="{% trans 'Overall device score' %}">{% if entry.evaluated %}{{ entry.score|floatformat:0 }}%{% else %}&mdash;{% endif %}</span>
     </div>
     <ul class="cr-sub">
       {% for cell in entry.rows %}

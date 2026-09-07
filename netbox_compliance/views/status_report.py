@@ -25,6 +25,21 @@ _FAILING_STATUSES = (
     EffectiveStatusChoices.STALE,
 )
 _PASSING_STATUSES = (EffectiveStatusChoices.PASS, EffectiveStatusChoices.EXEMPT)
+# A measure has actually been evaluated (vs. still awaiting its first result) if it
+# resolved to any real outcome. PENDING and NOT_APPLICABLE are not outcomes -- a
+# device whose measures are all in those states has "no results yet", which is not
+# the same as "no failing tests".
+_RESOLVED_STATUSES = (
+    EffectiveStatusChoices.PASS,
+    EffectiveStatusChoices.FAIL,
+    EffectiveStatusChoices.ERROR,
+    EffectiveStatusChoices.STALE,
+    EffectiveStatusChoices.EXEMPT,
+)
+
+
+def _has_results(rows):
+    return any(r.status in _RESOLVED_STATUSES for r in rows)
 
 _SEVERITY_ORDER = [value for value, *_ in ComplianceMeasureSeverityChoices.CHOICES]
 _SEVERITY_LABELS = {value: label for value, label, *_ in ComplianceMeasureSeverityChoices.CHOICES}
@@ -157,18 +172,21 @@ def _build_by_package(site_ids=None, tenant_ids=None, package_ids=None, measure_
                     'color': color,
                     'score': score,
                     'counters': counters,
+                    'evaluated': _has_results(package_rows),
                 })
                 device_measure_rows.extend(package_rows)
 
             if any(r['color'] == 'red' for r in rows):
                 noncompliant += 1
             site_rows.extend(device_measure_rows)
+            evaluated = _has_results(device_measure_rows)
             dev_score, dev_color = _device_score_display(device, effective)
             dev_counters, dev_total = _severity_counters(device_measure_rows, severity_filter)
             device_entries.append({
                 'device': device,
                 'score': dev_score,
-                'score_color': dev_color,
+                'score_color': dev_color if evaluated else 'grey',
+                'evaluated': evaluated,
                 'counters': dev_counters,
                 'total_fail': dev_total,
                 'rows': rows,
@@ -184,6 +202,7 @@ def _build_by_package(site_ids=None, tenant_ids=None, package_ids=None, measure_
                 'noncompliant_count': noncompliant,
                 'score': site_score,
                 'score_color': site_score_color,
+                'evaluated': _has_results(site_rows),
             })
     return {'sites': sites, 'total_devices': total_devices, 'tab': 'by_package'}
 
@@ -195,9 +214,10 @@ def _by_package_csv(data):
         'Package', 'Traffic Light', 'Package Score', 'Package Failing Tests',
     ])
     for site_entry in data['sites']:
-        site_score = site_entry['score'] if site_entry['score'] is not None else ''
+        site_score = site_entry['score'] if site_entry['score'] is not None and site_entry['evaluated'] else ''
         for entry in site_entry['devices']:
             device = entry['device']
+            dev_score = entry['score'] if entry['score'] is not None and entry['evaluated'] else ''
             for row in entry['rows']:
                 writer.writerow([
                     device.name,
@@ -205,11 +225,11 @@ def _by_package_csv(data):
                     site_score,
                     device.tenant.name if device.tenant else '',
                     device.role.name if device.role else '',
-                    entry['score'] if entry['score'] is not None else '',
+                    dev_score,
                     _counter_summary(entry['counters']),
                     row['package'].name,
                     row['color'],
-                    row['score'] if row['score'] is not None else '',
+                    row['score'] if row['score'] is not None and row['evaluated'] else '',
                     _counter_summary(row['counters']),
                 ])
     return response
@@ -270,11 +290,13 @@ def _build_by_test(site_ids=None, tenant_ids=None, package_ids=None, measure_ids
             site_rows.extend(rows)
             counters, total = _severity_counters(rows)
             failing_tests += total
+            evaluated = _has_results(rows)
             dev_score, dev_color = _device_score_display(device, effective)
             device_entries.append({
                 'device': device,
                 'score': dev_score,
-                'score_color': dev_color,
+                'score_color': dev_color if evaluated else 'grey',
+                'evaluated': evaluated,
                 'counters': counters,
                 'total_fail': total,
                 'rows': cells,
@@ -290,6 +312,7 @@ def _build_by_test(site_ids=None, tenant_ids=None, package_ids=None, measure_ids
                 'failing_test_count': failing_tests,
                 'score': site_score,
                 'score_color': site_score_color,
+                'evaluated': _has_results(site_rows),
             })
     return {'sites': sites, 'total_devices': total_devices, 'tab': 'by_test'}
 
@@ -301,9 +324,10 @@ def _by_test_csv(data):
         'Test', 'Severity', 'Status', 'Value',
     ])
     for site_entry in data['sites']:
-        site_score = site_entry['score'] if site_entry['score'] is not None else ''
+        site_score = site_entry['score'] if site_entry['score'] is not None and site_entry['evaluated'] else ''
         for entry in site_entry['devices']:
             device = entry['device']
+            dev_score = entry['score'] if entry['score'] is not None and entry['evaluated'] else ''
             for cell in entry['rows']:
                 writer.writerow([
                     device.name,
@@ -311,7 +335,7 @@ def _by_test_csv(data):
                     site_score,
                     device.tenant.name if device.tenant else '',
                     device.role.name if device.role else '',
-                    entry['score'] if entry['score'] is not None else '',
+                    dev_score,
                     _counter_summary(entry['counters']),
                     cell['measure'].name,
                     cell['measure'].get_severity_display(),
