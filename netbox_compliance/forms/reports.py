@@ -3,6 +3,7 @@ from django import forms
 from dcim.models import DeviceRole, Site
 from tenancy.models import Tenant
 
+from ..choices import ComplianceMeasureSeverityChoices
 from ..models import CompliancePackage, ComplianceMeasure
 
 __all__ = ('StatusReportFilterForm', 'TrendReportFilterForm')
@@ -36,6 +37,14 @@ class StatusReportFilterForm(forms.Form):
         required=False,
         label="Test",
         help_text="Narrows the By Test tab's columns. If Package is set and Test is left blank, only that package's tests are shown",
+        widget=forms.SelectMultiple(attrs=_MULTI),
+    )
+    severity = forms.MultipleChoiceField(
+        choices=[(value, label) for value, label, *_ in ComplianceMeasureSeverityChoices.CHOICES],
+        required=False,
+        label="Criticality",
+        help_text="Which severity levels to include. Leave all selected (or blank) for everything.",
+        initial=[value for value, *_ in ComplianceMeasureSeverityChoices.CHOICES],
         widget=forms.SelectMultiple(attrs=_MULTI),
     )
 

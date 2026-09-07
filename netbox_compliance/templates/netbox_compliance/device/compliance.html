@@ -8,7 +8,18 @@
     .compliance-collapse-toggle .mdi-chevron-right { transition: transform 0.15s ease-in-out; }
     .compliance-collapse-toggle[aria-expanded="true"] .mdi-chevron-right { transform: rotate(90deg); }
     [id^="package-"], [id^="measure-"], #direct-measures { scroll-margin-top: 80px; }
-    tr[id^="measure-"].compliance-anchor-target { outline: 2px solid var(--bs-primary, #0d6efd); outline-offset: -2px; }
+    tr[id^="measure-"].compliance-anchor-target { outline: 2px solid var(--tblr-primary, #0d6efd); outline-offset: -2px; }
+    /* Coloured band on each table's title -- matches the Package & Test Status
+       Report's site headers. Fixed teal so it holds up in both light and dark.
+       !important + the .page-body prefix are needed to beat Tabler's
+       `.page-body .card .card-header{background:var(--tblr-bg-surface-tertiary)}`. */
+    .page-body .card > .card-header {
+      background-color: #12897a !important; color: #fff !important;
+      text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
+      border-bottom: 1px solid rgba(0, 0, 0, .14);
+    }
+    .page-body .card > .card-header a { color: #fff !important; }
+    .page-body .card > .card-header .badge { text-shadow: none; }
   </style>
 
   <div class="d-flex justify-content-end gap-2 mb-3">

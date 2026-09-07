@@ -6,29 +6,119 @@
 
 {% block content %}
 <style>
-  .status-report-wrap { overflow-x: auto; }
-  .status-report-table thead th { white-space: nowrap; }
-  .status-report-table th.device-col,
-  .status-report-table td.device-col {
-    position: sticky;
-    left: 0;
-    z-index: 2;
-    box-shadow: 1px 0 0 var(--bs-border-color);
+  /* NetBox 4.x is built on Tabler -- its CSS custom properties are --tblr-*, NOT
+     --bs-*. Every colour/border below reads a --tblr-* var (with a literal
+     fallback) so the shading and outlines actually render. */
+  .cr-report {
+    --cr-line: var(--tblr-border-color, #d6dae0);
+    --cr-muted: var(--tblr-secondary, #6b7280);
+    --cr-mono: var(--tblr-font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace);
+    --cr-radius: var(--tblr-border-radius, 6px);
+    --cr-radius-sm: var(--tblr-border-radius-sm, 4px);
+    /* shared right-hand columns: status | name | counters | score.
+       Keeping this identical on the device row and every package/test row
+       under it is what lines the severity badges up into a column. Both the
+       name and counters tracks are flexible (fr) -- name takes the larger
+       share so the model/tenant stays on the same line as the device name,
+       and the counters row only wraps once a narrow window squeezes it
+       below its min. */
+    --cr-grid: 1.4rem minmax(12rem, 2fr) minmax(13rem, 1fr) 4.75rem;
   }
-  .status-report-table thead th.device-col { z-index: 3; }
-  .status-report-table td.blob-col { text-align: center; min-width: 56px; }
-  .status-report-table th.blob-col { min-width: 90px; }
-  /* Severity ring around a failing/error/stale status dot -- thicker + brighter for higher
-     severity, so a critical-test failure visually outranks a low/medium one at a glance,
-     not just via the tooltip. Not applied to passing/N/A cells -- severity only matters
-     once something's actually wrong. */
+  /* By Test rows put a status string (not a %) in the last column, so give it room. */
+  .cr-by_test { --cr-grid: 1.4rem minmax(12rem, 2fr) minmax(11rem, 1fr) 8.5rem; }
+
+  .cr-site { border: 1px solid var(--cr-line); border-radius: var(--cr-radius); margin-bottom: 1.5rem; overflow: hidden; }
+  .cr-site-head {
+    /* fixed teal -- NetBox's --tblr-primary swaps to a near-neon cyan in dark
+       mode, which white text can't sit on. This lighter tone works in both
+       themes; the text-shadow keeps the white crisp on it. */
+    background-color: #12897a; color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
+    padding: .5rem .85rem; display: flex; align-items: center; gap: .7rem; flex-wrap: wrap;
+    border-bottom: 1px solid rgba(0, 0, 0, .14);
+  }
+  .cr-site-head h3 { margin: 0; font-size: 1.05rem; font-weight: 700; color: #fff; }
+  .cr-site-head h3 a { color: #fff; text-decoration: none; }
+  .cr-site-head h3 a:hover { text-decoration: underline; }
+  .cr-site-head .cr-spacer { flex: 1 1 auto; }
+  .cr-site-head .badge { text-shadow: none; }
+  .cr-site-head .cr-site-score {
+    font-family: var(--cr-mono); font-size: .8rem; font-weight: 700; padding: .1rem .55rem;
+    border-radius: var(--cr-radius-sm);
+    background: rgba(255, 255, 255, .2); border: 1px solid rgba(255, 255, 255, .55); color: #fff;
+  }
+  .cr-site-body { padding: .6rem; display: flex; flex-direction: column; gap: .6rem; }
+
+  /* one bordered block per device */
+  .cr-dev { border: 1px solid var(--cr-line); border-radius: var(--cr-radius-sm); overflow: hidden; }
+  .cr-dev-line, .cr-sub > li {
+    display: grid; grid-template-columns: var(--cr-grid);
+    align-items: center; gap: .55rem; padding: .38rem .7rem;
+  }
+  .cr-dev-line {
+    background-color: var(--tblr-bg-surface-secondary, #f1f3f6);
+    border-bottom: 1px solid var(--cr-line); font-weight: 600;
+  }
+  /* Device name spans the status + name columns so it sits flush-left at the
+     row edge (the package/test rows keep their status dot in column 1 and
+     their name indented in column 2). */
+  .cr-dev-line .cr-name { grid-column: 1 / 3; display: flex; align-items: baseline; gap: .4rem; flex-wrap: wrap; min-width: 0; }
+  .cr-dev-meta { font-family: var(--cr-mono); font-size: .72rem; font-weight: 400; color: var(--cr-muted); }
+  .cr-dl { color: var(--cr-muted); }
+
+  .cr-sub { list-style: none; margin: 0; padding: 0; }
+  .cr-sub > li { font-size: .84rem; border-bottom: 1px solid var(--cr-line); }
+  .cr-sub > li:last-child { border-bottom: none; }
+  .cr-sub .cr-name { padding-left: 1.1rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cr-sub .cr-name .cr-sev { font-family: var(--cr-mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .04em; color: var(--cr-muted); margin-left: .4rem; }
+  .cr-sub li.cr-passing.cr-hide { display: none; }
+
+  .cr-name a { text-decoration: none; }
+  .cr-status { display: flex; justify-content: center; align-items: center; }
+
+  .cr-counters { display: flex; gap: .25rem; flex-wrap: wrap; align-content: center; }
+  /* Own badge styling rather than Bootstrap's .text-bg-* -- NetBox has no
+     .text-bg-grey (only -gray), so the Informational counter rendered as
+     unstyled text. Critical/High/Medium/Low are filled; Informational is a
+     grey outline so the lowest severity still reads as a distinct chip. */
+  .cr-cnt {
+    font-family: var(--cr-mono); font-weight: 600; font-size: .74rem; white-space: nowrap;
+    display: inline-flex; align-items: center; padding: .06rem .4rem;
+    border-radius: var(--cr-radius-sm); border: 1px solid transparent; color: #fff;
+  }
+  .cr-cnt-critical { background: var(--tblr-red, #d63939); }
+  .cr-cnt-high { background: var(--tblr-orange, #f76707); }
+  .cr-cnt-medium { background: var(--tblr-yellow, #f59f00); color: #1a1d21; }
+  .cr-cnt-low { background: var(--tblr-blue, #066fd1); }
+  .cr-cnt-informational { background: transparent; color: var(--cr-muted); border-color: var(--cr-muted); }
+  .cr-clean { font-family: var(--cr-mono); font-size: .72rem; color: var(--tblr-success, #2fb344); white-space: nowrap; }
+
+  .cr-score, .cr-val { font-family: var(--cr-mono); font-size: .78rem; text-align: right; white-space: nowrap; justify-self: end; }
+  .cr-val { color: var(--cr-muted); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .cr-score { font-weight: 700; padding: .03rem .4rem; border-radius: var(--cr-radius-sm); border: 1px solid var(--cr-line); }
+  .cr-score.cr-green { color: var(--tblr-success, #2fb344); border-color: currentColor; }
+  .cr-score.cr-amber { color: var(--tblr-warning, #f59f00); border-color: currentColor; }
+  .cr-score.cr-red { color: var(--tblr-danger, #d63939); border-color: currentColor; }
+  .cr-score.cr-grey { color: var(--cr-muted); }
+
+  /* Severity ring around a failing/error/stale status dot -- thicker + brighter for
+     higher severity so a critical failure visually outranks a low one. */
   .severity-ring { display: inline-block; border-radius: 0; }
   .severity-ring-critical { outline: 3px solid #dc3545; outline-offset: 2px; }
   .severity-ring-high { outline: 2px solid #fd7e14; outline-offset: 2px; }
   .severity-ring-medium { outline: 2px solid #ffc107; outline-offset: 1px; }
   .severity-ring-low { outline: 1px solid #0d6efd; outline-offset: 1px; }
   .severity-ring-informational { outline: 1px dashed #6c757d; outline-offset: 1px; }
+
+  @media (max-width: 820px) {
+    .cr-report, .cr-by_test { --cr-grid: 1.4rem 1fr; }
+    .cr-dev-line .cr-counters, .cr-dev-line .cr-score,
+    .cr-sub > li .cr-counters, .cr-sub > li .cr-val {
+      grid-column: 1 / -1; justify-self: start; padding-left: 1.95rem;
+    }
+  }
 </style>
+
+<div class="cr-report cr-{{ report_key }}">
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0">{% trans "Package & Test Status Report" %}</h2>
@@ -60,6 +150,10 @@
         <label class="form-label form-label-sm mb-1">{% trans "Test" %}</label>
         {{ form.measure }}
       </div>
+      <div class="col-auto">
+        <label class="form-label form-label-sm mb-1">{% trans "Criticality" %}</label>
+        {{ form.severity }}
+      </div>
       <div class="col-auto d-flex flex-column gap-2 justify-content-end">
         <input type="hidden" name="submitted" value="1">
         <button type="submit" class="btn btn-sm btn-primary"><i class="mdi mdi-filter"></i> {% trans "Apply" %}</button>
@@ -68,7 +162,7 @@
     </form>
     <p class="text-muted small mb-0 mt-2">
       <i class="mdi mdi-information-outline me-1"></i>
-      {% trans "Hold Ctrl / Cmd to select multiple. Leave Package/Test blank to show every active one. On the By Test tab, setting Package alone narrows the columns to that package's own tests." %}
+      {% trans "Hold Ctrl / Cmd to select multiple. Leave Package/Test blank to list every applicable one per device. On the By Test tab, setting Package alone narrows to that package's own tests." %}
     </p>
   </div>
 </div>
@@ -93,138 +187,153 @@
   <span>{% trans "Select filters above and click" %} <strong>{% trans "Apply" %}</strong> {% trans "to generate the report." %}</span>
 </div>
 
+{% elif not sites %}
+<div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No devices match the current filter." %}</div>
+
 {% else %}
 
+{# ═══════════════ BY PACKAGE ═══════════════ #}
 {% if report_key == "by_package" %}
 
-<div class="d-flex align-items-center gap-3 mb-3">
+<div class="d-flex align-items-center gap-3 mb-3 small">
   <span title="{% trans 'Every required measure passed (or is not applicable)' %}">{% badge '' bg_color='green' show_empty=True %} {% trans "Compliant" %}</span>
-  <span title="{% trans 'Below the package amber threshold, or a critical/high severity required measure is failing' %}">{% badge '' bg_color='red' show_empty=True %} {% trans "Non-compliant" %}</span>
+  <span title="{% trans 'Below the package amber threshold, or a critical/high required measure is failing' %}">{% badge '' bg_color='red' show_empty=True %} {% trans "Non-compliant" %}</span>
   <span title="{% trans 'Below 100% but above the package amber threshold' %}">{% badge '' bg_color='amber' show_empty=True %} {% trans "Amber" %}</span>
-  <span title="{% trans 'Package not assigned to this device, or no results yet' %}">{% badge '' bg_color='grey' show_empty=True %} {% trans "N/A / Pending" %}</span>
+  <span title="{% trans 'No results yet' %}">{% badge '' bg_color='grey' show_empty=True %} {% trans "Pending" %}</span>
+  <span class="text-muted">{% trans "Counters = failing / errored / stale tests by severity" %}</span>
 </div>
 
-{% if not packages %}
-  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No packages match the current filter." %}</div>
-{% elif not rows %}
-  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No devices match the current filter." %}</div>
-{% else %}
-<div class="card">
-  <div class="card-body p-0">
-    <div class="status-report-wrap">
-      <table class="table table-hover table-sm mb-0 status-report-table">
-        <thead class="table-dark">
-          <tr>
-            <th class="device-col bg-body" style="min-width:220px">{% trans "Device" %}</th>
-            {% for package in packages %}
-              <th class="blob-col"><a href="{{ package.get_absolute_url }}" class="text-white">{{ package.name }}</a></th>
-            {% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows %}
-          <tr>
-            <td class="device-col bg-body">
-              <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}">{{ row.device.name }}</a>
-              <a href="{% url 'dcim:device_compliance_export' pk=row.device.pk %}?download=1" title="{% trans 'Download full compliance report for this device' %}" class="text-muted ms-1">
-                <i class="mdi mdi-download" aria-hidden="true"></i>
-              </a>
-              <div class="text-muted small">
-                {{ row.device.site|default:"—" }}{% if row.device.tenant %} &middot; {{ row.device.tenant }}{% endif %}
-              </div>
-            </td>
-            {% for cell in row.cells %}
-              <td class="blob-col">
-                <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}#package-{{ cell.package.slug }}"
-                   title="{{ cell.package.name }}: {% if cell.applicable %}{{ cell.score }}%{% else %}{% trans 'Not applicable' %}{% endif %}"
-                   class="text-reset text-decoration-none">
-                  {% badge '' bg_color=cell.color show_empty=True %}
-                </a>
-              </td>
-            {% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+{% for site_entry in sites %}
+<div class="cr-site">
+  <div class="cr-site-head">
+    <h3>{% if site_entry.site %}<a href="{{ site_entry.site.get_absolute_url }}">{{ site_entry.site.name }}</a>{% else %}{% trans "No site" %}{% endif %}</h3>
+    {% if site_entry.score is not None %}<span class="cr-site-score" title="{% trans 'Weighted score across every listed test at this site' %}">{{ site_entry.score|floatformat:0 }}%</span>{% endif %}
+    <span class="cr-spacer"></span>
+    <span class="badge text-bg-light">{{ site_entry.device_count }} {% trans "device" %}{{ site_entry.device_count|pluralize }}</span>
+    {% if site_entry.noncompliant_count %}<span class="badge text-bg-danger">{{ site_entry.noncompliant_count }} {% trans "non-compliant" %}</span>{% endif %}
+  </div>
+
+  <div class="cr-site-body">
+  {% for entry in site_entry.devices %}
+  <div class="cr-dev">
+    <div class="cr-dev-line">
+      <span class="cr-name">
+        <a href="{% url 'dcim:device_compliance' pk=entry.device.pk %}">{{ entry.device.name }}</a>
+        <a href="{% url 'dcim:device_compliance_export' pk=entry.device.pk %}?download=1" title="{% trans 'Download full compliance report for this device' %}" class="cr-dl">
+          <i class="mdi mdi-download" aria-hidden="true"></i>
+        </a>
+        <span class="cr-dev-meta">{{ entry.device.tenant|default:"—" }} &middot; {{ entry.device.role|default:"—" }} &middot; {{ entry.device.device_type }}</span>
+      </span>
+      {% if entry.counters %}
+        <span class="cr-counters">
+          {% for c in entry.counters %}<span class="cr-cnt cr-cnt-{{ c.severity }}" title="{{ c.label }}">{{ c.count }} {{ c.short }}</span>{% endfor %}
+        </span>
+      {% else %}
+        <span class="cr-counters"><span class="cr-clean"><i class="mdi mdi-check"></i> {% trans "no failing tests" %}</span></span>
+      {% endif %}
+      <span class="cr-score cr-{{ entry.score_color }}" title="{% trans 'Overall device score' %}">{{ entry.score|floatformat:0 }}%</span>
     </div>
+    <ul class="cr-sub">
+      {% for row in entry.rows %}
+      <li>
+        <span class="cr-status">{% badge '' bg_color=row.color show_empty=True %}</span>
+        <span class="cr-name">
+          <a href="{% url 'dcim:device_compliance' pk=entry.device.pk %}#package-{{ row.package.slug }}" class="text-reset">{{ row.package.name }}</a>
+        </span>
+        <span class="cr-counters">
+          {% for c in row.counters %}<span class="cr-cnt cr-cnt-{{ c.severity }}" title="{{ c.label }}">{{ c.count }} {{ c.short }}</span>{% endfor %}
+        </span>
+        <span class="cr-val">{{ row.score|floatformat:0 }}%</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
   </div>
 </div>
-{% endif %}
+{% endfor %}
 
+{# ═══════════════ BY TEST ═══════════════ #}
 {% elif report_key == "by_test" %}
 
-<div class="d-flex align-items-center gap-3 mb-2">
-  <span>{% badge '' bg_color='green' show_empty=True %} {% trans "Pass" %}</span>
-  <span>{% badge '' bg_color='red' show_empty=True %} {% trans "Fail" %}</span>
-  <span>{% badge '' bg_color='dark-red' show_empty=True %} {% trans "Error" %}</span>
-  <span>{% badge '' bg_color='orange' show_empty=True %} {% trans "Stale" %}</span>
-  <span title="{% trans 'Test not assigned/exempt for this device, or no result yet' %}">{% badge '' bg_color='grey' show_empty=True %} {% trans "N/A / Pending" %}</span>
-</div>
-<div class="d-flex align-items-center gap-3 mb-3 text-muted small">
-  <span class="me-1">{% trans "Severity of a failing/error/stale test:" %}</span>
-  <span><span class="severity-ring severity-ring-critical">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Critical" %}</span>
-  <span><span class="severity-ring severity-ring-high">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "High" %}</span>
-  <span><span class="severity-ring severity-ring-medium">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Medium" %}</span>
-  <span><span class="severity-ring severity-ring-low">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Low" %}</span>
-  <span><span class="severity-ring severity-ring-informational">{% badge '' bg_color='red' show_empty=True %}</span> {% trans "Informational" %}</span>
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+  <div class="d-flex align-items-center gap-3 small">
+    <span>{% badge '' bg_color='green' show_empty=True %} {% trans "Pass" %}</span>
+    <span>{% badge '' bg_color='red' show_empty=True %} {% trans "Fail" %}</span>
+    <span>{% badge '' bg_color='dark-red' show_empty=True %} {% trans "Error" %}</span>
+    <span>{% badge '' bg_color='orange' show_empty=True %} {% trans "Stale" %}</span>
+    <span>{% badge '' bg_color='grey' show_empty=True %} {% trans "Pending" %}</span>
+    <span class="text-muted">{% trans "ring = severity" %}</span>
+  </div>
+  <label class="small text-muted d-inline-flex align-items-center gap-1" style="cursor:pointer;">
+    <input type="checkbox" id="cr-hide-passing"> {% trans "Hide passing tests" %}
+  </label>
 </div>
 
-{% if not measures %}
-  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No tests match the current filter." %}</div>
-{% elif not rows %}
-  <div class="alert alert-info"><i class="mdi mdi-information-outline me-1"></i>{% trans "No devices match the current filter." %}</div>
-{% else %}
-<div class="card">
-  <div class="card-body p-0">
-    <div class="status-report-wrap">
-      <table class="table table-hover table-sm mb-0 status-report-table">
-        <thead class="table-dark">
-          <tr>
-            <th class="device-col bg-body" style="min-width:220px">{% trans "Device" %}</th>
-            {% for measure in measures %}
-              <th class="blob-col">
-                <a href="{{ measure.get_absolute_url }}" class="text-white">{{ measure.name }}</a>
-                <div class="mt-1">
-                  <span class="badge text-bg-{{ measure.get_severity_color }}" style="font-size:0.6rem;">
-                    {{ measure.get_severity_display }}
-                  </span>
-                </div>
-              </th>
-            {% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows %}
-          <tr>
-            <td class="device-col bg-body">
-              <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}">{{ row.device.name }}</a>
-              <a href="{% url 'dcim:device_compliance_export' pk=row.device.pk %}?download=1" title="{% trans 'Download full compliance report for this device' %}" class="text-muted ms-1">
-                <i class="mdi mdi-download" aria-hidden="true"></i>
-              </a>
-              <div class="text-muted small">
-                {{ row.device.site|default:"—" }}{% if row.device.tenant %} &middot; {{ row.device.tenant }}{% endif %}
-              </div>
-            </td>
-            {% for cell in row.cells %}
-              <td class="blob-col">
-                <a href="{% url 'dcim:device_compliance' pk=row.device.pk %}#measure-{{ cell.measure.slug }}"
-                   title="{{ cell.measure.name }} ({{ cell.measure.get_severity_display }}): {{ cell.status_label }}{% if cell.value %} ({{ cell.value }}){% endif %}"
-                   class="text-reset text-decoration-none">
-                  <span{% if cell.applicable and cell.color != 'green' %} class="severity-ring severity-ring-{{ cell.measure.severity }}"{% endif %}>
-                    {% badge '' bg_color=cell.color show_empty=True %}
-                  </span>
-                </a>
-              </td>
-            {% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+{% for site_entry in sites %}
+<div class="cr-site">
+  <div class="cr-site-head">
+    <h3>{% if site_entry.site %}<a href="{{ site_entry.site.get_absolute_url }}">{{ site_entry.site.name }}</a>{% else %}{% trans "No site" %}{% endif %}</h3>
+    {% if site_entry.score is not None %}<span class="cr-site-score" title="{% trans 'Weighted score across every listed test at this site' %}">{{ site_entry.score|floatformat:0 }}%</span>{% endif %}
+    <span class="cr-spacer"></span>
+    <span class="badge text-bg-light">{{ site_entry.device_count }} {% trans "device" %}{{ site_entry.device_count|pluralize }}</span>
+    {% if site_entry.failing_test_count %}<span class="badge text-bg-danger">{{ site_entry.failing_test_count }} {% trans "failing test" %}{{ site_entry.failing_test_count|pluralize }}</span>{% endif %}
+  </div>
+
+  <div class="cr-site-body">
+  {% for entry in site_entry.devices %}
+  <div class="cr-dev">
+    <div class="cr-dev-line">
+      <span class="cr-name">
+        <a href="{% url 'dcim:device_compliance' pk=entry.device.pk %}">{{ entry.device.name }}</a>
+        <a href="{% url 'dcim:device_compliance_export' pk=entry.device.pk %}?download=1" title="{% trans 'Download full compliance report for this device' %}" class="cr-dl">
+          <i class="mdi mdi-download" aria-hidden="true"></i>
+        </a>
+        <span class="cr-dev-meta">{{ entry.device.tenant|default:"—" }} &middot; {{ entry.device.role|default:"—" }} &middot; {{ entry.device.device_type }}</span>
+      </span>
+      {% if entry.counters %}
+        <span class="cr-counters">
+          {% for c in entry.counters %}<span class="cr-cnt cr-cnt-{{ c.severity }}" title="{{ c.label }}">{{ c.count }} {{ c.short }}</span>{% endfor %}
+        </span>
+      {% else %}
+        <span class="cr-counters"><span class="cr-clean"><i class="mdi mdi-check"></i> {% trans "no failing tests" %}</span></span>
+      {% endif %}
+      <span class="cr-score cr-{{ entry.score_color }}" title="{% trans 'Overall device score' %}">{{ entry.score|floatformat:0 }}%</span>
     </div>
+    <ul class="cr-sub">
+      {% for cell in entry.rows %}
+      <li class="{% if cell.passing %}cr-passing{% endif %}">
+        <span class="cr-status">
+          <span{% if not cell.passing %} class="severity-ring severity-ring-{{ cell.severity }}"{% endif %}>{% badge '' bg_color=cell.color show_empty=True %}</span>
+        </span>
+        <span class="cr-name">
+          <a href="{% url 'dcim:device_compliance' pk=entry.device.pk %}#measure-{{ cell.measure.slug }}" class="text-reset">{{ cell.measure.name }}</a>
+          <span class="cr-sev">{{ cell.measure.get_severity_display }}</span>
+        </span>
+        <span class="cr-counters"></span>
+        <span class="cr-val" title="{{ cell.status_label }}{% if cell.value %} ({{ cell.value }}){% endif %}">{{ cell.status_label }}{% if cell.value %} ({{ cell.value }}){% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
   </div>
 </div>
-{% endif %}
+{% endfor %}
+
+<script>
+  (function () {
+    var box = document.getElementById('cr-hide-passing');
+    if (!box) return;
+    box.addEventListener('change', function () {
+      document.querySelectorAll('.cr-sub li.cr-passing').forEach(function (li) {
+        li.classList.toggle('cr-hide', box.checked);
+      });
+    });
+  })();
+</script>
 
 {% endif %}
 {% endif %}
+</div>{# /.cr-report #}
 {% endblock content %}

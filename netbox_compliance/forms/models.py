@@ -133,7 +133,12 @@ class PackageAssignmentForm(NetBoxModelForm):
         )
 
     def clean(self):
-        cleaned_data = super().clean()
+        # NetBoxModelForm's clean chain runs through CheckLastUpdatedMixin.clean(),
+        # which returns None (not cleaned_data) on an add and on several other
+        # branches -- so `super().clean()` can't be trusted to hand back the dict.
+        # Call it for its side effects, then read self.cleaned_data directly.
+        super().clean()
+        cleaned_data = self.cleaned_data
         if cleaned_data.get('tenants') and cleaned_data.get('device'):
             raise forms.ValidationError({
                 'tenants': _('Tenant narrowing does not apply to a device-scoped assignment.'),
@@ -172,7 +177,8 @@ class PackageAssignmentBulkAssignForm(forms.Form):
     )
 
     def clean(self):
-        cleaned_data = super().clean()
+        super().clean()
+        cleaned_data = self.cleaned_data
         filled_fields = [field for field in SCOPE_FIELDS if cleaned_data.get(field)]
         if len(filled_fields) == 0:
             raise forms.ValidationError(
