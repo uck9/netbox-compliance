@@ -29,6 +29,7 @@ from ..services import (
 )
 from . import serializers
 from .. import filtersets
+from ..reporting import REPORT_BUILDERS, SEVERITY_ORDER, extract_filters
 
 __all__ = (
     'ComplianceMeasureViewSet',
@@ -46,6 +47,7 @@ __all__ = (
     'DeviceComplianceStatusView',
     'DeviceEffectiveMeasuresView',
     'MonthlyReportView',
+    'StatusReportView',
 )
 
 
@@ -476,4 +478,129 @@ class MonthlyReportView(APIView):
             'compliant': compliant_count,
             'non_compliant': total - compliant_count,
             'devices': serializer.data,
+        })
+
+
+def _ref(obj):
+    """Compact {id, display, name?, slug?, url?} reference to a related object."""
+    if obj is None:
+        return None
+    ref = {'id': obj.pk, 'display': str(obj)}
+    for attr in ('name', 'slug'):
+        if hasattr(obj, attr):
+            ref[attr] = getattr(obj, attr)
+    if hasattr(obj, 'get_absolute_url'):
+        ref['url'] = obj.get_absolute_url()
+    return ref
+
+
+def _num(value):
+    return float(value) if value is not None else None
+
+
+def _serialize_status_report(data):
+    """Turn reporting.build_by_package / build_by_test output (which carries live
+    model instances and Decimals) into JSON-safe primitives, same shape as the
+    HTML report: sites -> devices -> rows."""
+    by_test = data['tab'] == 'by_test'
+    sites = []
+    for site_entry in data['sites']:
+        evaluated = site_entry['evaluated']
+        devices = []
+        for entry in site_entry['devices']:
+            device = entry['device']
+            dev_evaluated = entry['evaluated']
+            if by_test:
+                rows = [{
+                    'measure': {
+                        **_ref(cell['measure']),
+                        'severity': cell['severity'],
+                        'severity_label': cell['measure'].get_severity_display(),
+                    },
+                    'status': cell['status'],
+                    'status_label': cell['status_label'],
+                    'value': cell['value'],
+                    'color': cell['color'],
+                    'passing': cell['passing'],
+                } for cell in entry['rows']]
+            else:
+                rows = [{
+                    'package': _ref(row['package']),
+                    'traffic_light': row['color'],
+                    'score': _num(row['score']) if row['evaluated'] else None,
+                    'evaluated': row['evaluated'],
+                    'failing_by_severity': row['counters'],
+                } for row in entry['rows']]
+            devices.append({
+                'device': _ref(device),
+                'tenant': _ref(device.tenant),
+                'role': _ref(device.role),
+                'device_type': str(device.device_type) if device.device_type_id else None,
+                'score': _num(entry['score']) if dev_evaluated else None,
+                'score_color': entry['score_color'],
+                'evaluated': dev_evaluated,
+                'failing_by_severity': entry['counters'],
+                'total_failing': entry['total_fail'],
+                'rows': rows,
+            })
+        site = {
+            'site': _ref(site_entry['site']),
+            'device_count': site_entry['device_count'],
+            'score': _num(site_entry['score']) if evaluated else None,
+            'evaluated': evaluated,
+            'devices': devices,
+        }
+        if 'noncompliant_count' in site_entry:
+            site['noncompliant_count'] = site_entry['noncompliant_count']
+        if 'failing_test_count' in site_entry:
+            site['failing_test_count'] = site_entry['failing_test_count']
+        sites.append(site)
+    return sites
+
+
+class StatusReportView(APIView):
+    """
+    GET /api/plugins/compliance/reports/status/ -- the Package & Test Status
+    Report as JSON: devices grouped into a box per site, each with its overall
+    score and a Fail/Error/Stale count by severity, and (By Package) a per-
+    package traffic light + score, or (By Test) each applicable test's resolved
+    status. Live per-device resolution, the same one the HTML report and the
+    device Compliance tab use -- not monthly snapshots.
+
+    Query params (all repeatable, same names as the HTML report's filter bar):
+    `site`, `tenant`, `package`, `measure` (pk); `severity`
+    (critical/high/medium/low/informational -- omit or pass all for no
+    restriction); `tab` = `by_package` (default) or `by_test`.
+    """
+    queryset = ComplianceResult.objects.none()  # gates on netbox_compliance.view_complianceresult
+
+    def get(self, request):
+        from ..forms.reports import StatusReportFilterForm
+
+        tab = request.query_params.get('tab', 'by_package')
+        if tab not in REPORT_BUILDERS:
+            return Response(
+                {'detail': f"tab must be one of {sorted(REPORT_BUILDERS)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        form = StatusReportFilterForm(request.query_params or None)
+        if not form.is_valid():
+            return Response({'detail': 'Invalid filter', 'errors': form.errors},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        filters = extract_filters(form.cleaned_data)
+        data = REPORT_BUILDERS[tab](**filters)
+
+        return Response({
+            'tab': tab,
+            'total_devices': data['total_devices'],
+            'filters': {
+                'site': [s.pk for s in form.cleaned_data.get('site', [])],
+                'tenant': [t.pk for t in form.cleaned_data.get('tenant', [])],
+                'package': [p.pk for p in form.cleaned_data.get('package', [])],
+                'measure': [m.pk for m in form.cleaned_data.get('measure', [])],
+                'severity': filters.get('severity_values', list(SEVERITY_ORDER)),
+            },
+            'sites': _serialize_status_report(data),
         })

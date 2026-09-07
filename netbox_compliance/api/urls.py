@@ -27,6 +27,7 @@ urlpatterns = [
         views.DeviceEffectiveMeasuresView.as_view(),
         name='device-effective-measures',
     ),
+    path('reports/status/', views.StatusReportView.as_view(), name='status-report'),
     path('reports/<str:period>/', views.MonthlyReportView.as_view(), name='monthly-report'),
 ]
 

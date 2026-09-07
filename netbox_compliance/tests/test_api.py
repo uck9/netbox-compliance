@@ -465,6 +465,100 @@ class DeviceEffectiveMeasuresAPITest(ComplianceTestMixin, APITestCase):
         self.assertEqual(row['pass_threshold'], 90.0)
 
 
+class StatusReportAPITest(ComplianceTestMixin, APITestCase):
+    """GET /api/plugins/compliance/reports/status/ -- JSON form of the Package &
+    Test Status Report (reporting.build_by_package / build_by_test)."""
+
+    model = ComplianceResult
+    user_permissions = ('netbox_compliance.view_complianceresult',)
+
+    def setUp(self):
+        super().setUp()
+        from django.utils import timezone
+
+        from ..choices import CompliancePackageStatusChoices
+        from ..models import CompliancePackage, PackageAssignment, PackageMeasure
+
+        self.package = CompliancePackage.objects.create(
+            name='ApiRepPkg', slug='api-rep-pkg', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+        self.crit = make_measure('api-rep-crit')
+        self.crit.severity = ComplianceMeasureSeverityChoices.CRITICAL
+        self.crit.save()
+        self.low = make_measure('api-rep-low')
+        self.low.severity = ComplianceMeasureSeverityChoices.LOW
+        self.low.save()
+        PackageMeasure.objects.create(package=self.package, measure=self.crit, weight=1, required=True)
+        PackageMeasure.objects.create(package=self.package, measure=self.low, weight=1, required=True)
+        PackageAssignment.objects.create(package=self.package, site=self.site)
+
+        self.device = self.make_device(site=self.site)
+        for m in (self.crit, self.low):
+            ComplianceResult.objects.create(
+                device=self.device, measure=m, status='fail',
+                timestamp=timezone.now(), source='test',
+            )
+
+    def _url(self, **params):
+        url = reverse('plugins-api:netbox_compliance-api:status-report')
+        if params:
+            from urllib.parse import urlencode
+            url += '?' + urlencode(params, doseq=True)
+        return url
+
+    def test_by_package_shape(self):
+        response = self.client.get(self._url(tab='by_package', site=self.site.pk), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['tab'], 'by_package')
+        site = response.data['sites'][0]
+        self.assertEqual(site['site']['id'], self.site.pk)
+        dev = site['devices'][0]
+        self.assertEqual(dev['device']['id'], self.device.pk)
+        self.assertEqual(dev['total_failing'], 2)
+        sevs = {c['severity'] for c in dev['failing_by_severity']}
+        self.assertEqual(sevs, {'critical', 'low'})
+        row = dev['rows'][0]
+        self.assertEqual(row['package']['slug'], self.package.slug)
+        self.assertIn('traffic_light', row)
+
+    def test_by_test_shape_and_status(self):
+        response = self.client.get(self._url(tab='by_test', site=self.site.pk), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        rows = response.data['sites'][0]['devices'][0]['rows']
+        slugs = {r['measure']['slug']: r for r in rows}
+        self.assertEqual(slugs[self.crit.slug]['status'], 'fail')
+        self.assertEqual(slugs[self.crit.slug]['measure']['severity'], 'critical')
+
+    def test_severity_filter_narrows_by_test_rows(self):
+        response = self.client.get(
+            self._url(tab='by_test', site=self.site.pk, severity='critical'), **self.header,
+        )
+
+        rows = response.data['sites'][0]['devices'][0]['rows']
+        slugs = {r['measure']['slug'] for r in rows}
+        self.assertEqual(slugs, {self.crit.slug})
+        self.assertEqual(response.data['filters']['severity'], ['critical'])
+
+    def test_unevaluated_device_has_null_score(self):
+        other = self.make_device(name='api-rep-unevaluated', site=self.site)
+
+        response = self.client.get(self._url(tab='by_package', site=self.site.pk), **self.header)
+
+        by_name = {d['device']['name']: d for d in response.data['sites'][0]['devices']}
+        self.assertIsNone(by_name[other.name]['score'])
+        self.assertFalse(by_name[other.name]['evaluated'])
+
+    def test_invalid_tab_is_400(self):
+        response = self.client.get(self._url(tab='nonsense'), **self.header)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unauthenticated_is_denied(self):
+        response = self.client.get(self._url())  # no auth header
+        self.assertIn(response.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+
 class PackageAssignmentTenantsAPITest(ComplianceTestMixin, APITestCase):
     model = PackageAssignment
     user_permissions = (
