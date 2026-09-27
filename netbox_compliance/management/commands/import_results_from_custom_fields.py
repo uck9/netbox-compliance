@@ -2,8 +2,8 @@ from django.core.management.base import BaseCommand, CommandError
 
 from dcim.models import Device
 from netbox_compliance.choices import ComplianceMeasureResultTypeChoices
-from netbox_compliance.models import ComplianceMeasure, ComplianceResult
-from netbox_compliance.services import enum_credit_status
+from netbox_compliance.models import ComplianceMeasure
+from netbox_compliance.services import enum_credit_status, record_result
 
 
 class Command(BaseCommand):
@@ -64,9 +64,8 @@ class Command(BaseCommand):
             if dry_run:
                 self.stdout.write(f"Would create: {device} -> {measure.slug} = {raw_value!r} {details}")
             else:
-                ComplianceResult.objects.create(
-                    device=device,
-                    measure=measure,
+                record_result(
+                    device, measure,
                     status=enum_credit_status(measure.value_map[raw_value]),
                     value=raw_value,
                     details=details,

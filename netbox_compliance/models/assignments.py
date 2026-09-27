@@ -10,6 +10,7 @@ from .measures import ComplianceMeasure, CompliancePackage
 __all__ = (
     'PackageAssignment',
     'MeasureAssignment',
+    'SCOPE_FIELDS',
 )
 
 SCOPE_FIELDS = ('device', 'device_role', 'site', 'site_group', 'platform', 'tag')
@@ -20,6 +21,15 @@ class PackageAssignment(NetBoxModel):
     Assigns a CompliancePackage to a scope. Exactly one scope field must be
     set. A device's assigned packages are the union of all PackageAssignment
     rows whose scope matches the device.
+
+    `tenants` is an optional *narrowing* filter, not one of the SCOPE_FIELDS:
+    when set, the row only matches devices whose own tenant is one of those
+    tenants, on top of the scope field. This is how you say "package X on
+    all Catalyst platforms, but only for tenants ACME and Globex" without
+    restructuring the assignment. It has no meaning alongside a
+    device-scoped row (a device already pins its tenant), so that
+    combination is rejected by the forms, the API serializer, and the
+    `tenants` m2m_changed guard in signals.py.
     """
     package = models.ForeignKey(
         to=CompliancePackage,
@@ -75,6 +85,13 @@ class PackageAssignment(NetBoxModel):
         blank=True,
         verbose_name=_('tag'),
     )
+    tenants = models.ManyToManyField(
+        to='tenancy.Tenant',
+        related_name='compliance_package_assignments',
+        blank=True,
+        verbose_name=_('tenants'),
+        help_text=_('Optional: narrow the scope above to devices in one of these tenants only'),
+    )
     description = models.TextField(
         blank=True,
         verbose_name=_('description'),
@@ -87,6 +104,9 @@ class PackageAssignment(NetBoxModel):
         verbose_name_plural = _('package assignments')
 
     def __str__(self):
+        if self.pk and (tenants := list(self.tenants.all())):
+            names = ', '.join(str(t) for t in tenants)
+            return f'{self.package} -> {self.scope} (tenants: {names})'
         return f'{self.package} -> {self.scope}'
 
     def get_absolute_url(self):
@@ -110,6 +130,10 @@ class PackageAssignment(NetBoxModel):
             raise ValidationError(
                 _('Only one of device, device role, site, site group, platform, or tag may be set.')
             )
+        # The "tenants may not be combined with a device scope" rule can't
+        # live here -- an M2M isn't readable until the row is saved and the
+        # relations written. It's enforced by the forms, the API serializer,
+        # and the `tenants` m2m_changed guard in signals.py.
 
 
 class MeasureAssignment(NetBoxModel):

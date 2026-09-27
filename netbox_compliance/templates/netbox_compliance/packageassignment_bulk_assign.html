@@ -1,0 +1,22 @@
+{% extends 'base/layout.html' %}
+{% load form_helpers %}
+{% load i18n %}
+
+{% block title %}{% trans "Bulk Assign Package" %}{% endblock %}
+
+{% block content %}
+  <div class="row">
+    <div class="col col-md-8 offset-md-2">
+      <form method="post" class="mt-3">
+        {% csrf_token %}
+        {% for fieldset in form.fieldsets %}
+          {% render_fieldset form fieldset %}
+        {% endfor %}
+        <div class="float-end">
+          <a href="{% url 'plugins:netbox_compliance:packageassignment_list' %}" class="btn btn-outline-secondary">{% trans "Cancel" %}</a>
+          <button type="submit" class="btn btn-primary">{% trans "Create Assignments" %}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endblock content %}

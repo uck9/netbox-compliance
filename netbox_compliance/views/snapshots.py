@@ -1,3 +1,4 @@
+from netbox.object_actions import BulkDelete, BulkExport
 from netbox.views.generic import BulkDeleteView, ObjectDeleteView, ObjectListView, ObjectView
 from utilities.views import register_model_view
 
@@ -17,10 +18,10 @@ class ComplianceSnapshotListView(ObjectListView):
     table = tables.ComplianceSnapshotTable
     filterset = filtersets.ComplianceSnapshotFilterSet
     filterset_form = forms.ComplianceSnapshotFilterForm
-    actions = {
-        'export': {'view'},
-        'bulk_delete': {'delete'},
-    }
+    actions = (
+        BulkExport,
+        BulkDelete,
+    )
 
 
 @register_model_view(models.ComplianceSnapshot)

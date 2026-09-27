@@ -4,7 +4,7 @@ from django.utils.translation import gettext_lazy as _
 
 from netbox.models import NetBoxModel
 
-__all__ = ('ComplianceSnapshot',)
+__all__ = ('ComplianceSnapshot', 'ComplianceSnapshotMeasureResult')
 
 
 class ComplianceSnapshot(NetBoxModel):
@@ -25,6 +25,38 @@ class ComplianceSnapshot(NetBoxModel):
     device_name = models.CharField(
         max_length=100,
         verbose_name=_('device name'),
+        help_text=_('Denormalised for posterity'),
+    )
+    site = models.ForeignKey(
+        to='dcim.Site',
+        on_delete=models.SET_NULL,
+        related_name='compliance_snapshots',
+        null=True,
+        blank=True,
+        verbose_name=_('site'),
+        help_text=_("The device's site as of this period, not its current one -- lets "
+                     'trend reporting group by site historically even after a device moves.'),
+    )
+    site_name = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('site name'),
+        help_text=_('Denormalised for posterity'),
+    )
+    role = models.ForeignKey(
+        to='dcim.DeviceRole',
+        on_delete=models.SET_NULL,
+        related_name='compliance_snapshots',
+        null=True,
+        blank=True,
+        verbose_name=_('role'),
+        help_text=_("The device's role as of this period, not its current one -- same "
+                     'rationale as `site`.'),
+    )
+    role_name = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('role name'),
         help_text=_('Denormalised for posterity'),
     )
     period = models.DateField(
@@ -64,3 +96,45 @@ class ComplianceSnapshot(NetBoxModel):
 
     def get_absolute_url(self):
         return reverse('plugins:netbox_compliance:compliancesnapshot', args=[self.pk])
+
+
+class ComplianceSnapshotMeasureResult(models.Model):
+    """
+    One row per effective measure captured in a ComplianceSnapshot's frozen
+    `data` -- exists purely so per-measure pass/fail can be filtered and
+    aggregated across periods/sites/roles (see
+    services.measure_adherence_matrix) without parsing every snapshot's JSON
+    blob to answer "is adherence to measure X improving". Unlike every other
+    model in this app, this is a plain (non-NetBoxModel) side table: rows
+    have no standalone meaning outside the aggregate, so there's no
+    tags/custom-fields/changelog/journal and no list or detail view --
+    ComplianceSnapshot.data remains the single readable source of truth for
+    "what did this device look like", this table is just an index over it.
+    Regenerated whenever generate_snapshots_for_period() replaces a period's
+    snapshots; cascades with its parent snapshot.
+    """
+    snapshot = models.ForeignKey(
+        to='netbox_compliance.ComplianceSnapshot',
+        on_delete=models.CASCADE,
+        related_name='measure_results',
+    )
+    measure = models.CharField(max_length=100, db_index=True)
+    measure_name = models.CharField(max_length=200)
+    package = models.CharField(
+        max_length=100, blank=True,
+        help_text=_('Blank for a directly-assigned measure'),
+    )
+    package_name = models.CharField(max_length=200, blank=True)
+    severity = models.CharField(max_length=30)
+    status = models.CharField(max_length=30)
+    required = models.BooleanField(default=True)
+    weight = models.PositiveIntegerField(default=1)
+    credit = models.DecimalField(max_digits=5, decimal_places=2)
+
+    class Meta:
+        indexes = (
+            models.Index(fields=('measure', 'status')),
+        )
+
+    def __str__(self):
+        return f'{self.snapshot_id}:{self.measure}'

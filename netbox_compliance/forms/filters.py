@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from dcim.models import Device, DeviceRole, Platform, Site, SiteGroup
 from extras.models import Tag
 from netbox.forms import NetBoxModelFilterSetForm
+from tenancy.models import Tenant
 from utilities.forms.fields import DynamicModelMultipleChoiceField, TagFilterField
 from utilities.forms.rendering import FieldSet
 from utilities.forms.widgets import DatePicker
@@ -19,7 +20,9 @@ from ..models import (
     ComplianceExemption,
     ComplianceMeasure,
     CompliancePackage,
+    CompliancePackageReport,
     ComplianceResult,
+    ComplianceResultHistory,
     ComplianceSnapshot,
     MeasureAssignment,
     PackageAssignment,
@@ -34,7 +37,9 @@ __all__ = (
     'MeasureAssignmentFilterForm',
     'ComplianceExemptionFilterForm',
     'ComplianceResultFilterForm',
+    'ComplianceResultHistoryFilterForm',
     'ComplianceSnapshotFilterForm',
+    'CompliancePackageReportFilterForm',
 )
 
 
@@ -84,7 +89,10 @@ class PackageAssignmentFilterForm(NetBoxModelFilterSetForm):
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
         FieldSet('package_id', name=_('Assignment')),
-        FieldSet('device_id', 'device_role_id', 'site_id', 'site_group_id', 'platform_id', 'tag_id', name=_('Scope')),
+        FieldSet(
+            'device_id', 'device_role_id', 'site_id', 'site_group_id', 'platform_id', 'tag_id', 'tenant_id',
+            name=_('Scope'),
+        ),
     )
     package_id = DynamicModelMultipleChoiceField(
         queryset=CompliancePackage.objects.all(), required=False, label=_('Package'),
@@ -112,6 +120,9 @@ class PackageAssignmentFilterForm(NetBoxModelFilterSetForm):
     tag_id = DynamicModelMultipleChoiceField(
         queryset=Tag.objects.all(), required=False, label=_('Tag'),
     )
+    tenant_id = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'),
+    )
     tag = TagFilterField(model)
 
 
@@ -135,11 +146,15 @@ class ComplianceExemptionFilterForm(NetBoxModelFilterSetForm):
     model = ComplianceExemption
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
-        FieldSet('measure_id', 'device_id', 'site_id', 'site_group_id', 'tag_id', name=_('Scope')),
+        FieldSet('measure_id', 'package_id', name=_('Measure or Package')),
+        FieldSet('device_id', 'site_id', 'site_group_id', 'tag_id', 'tenant_id', name=_('Scope')),
         FieldSet('active', 'valid_until__lt', name=_('Validity')),
     )
     measure_id = DynamicModelMultipleChoiceField(
         queryset=ComplianceMeasure.objects.all(), required=False, label=_('Measure'),
+    )
+    package_id = DynamicModelMultipleChoiceField(
+        queryset=CompliancePackage.objects.all(), required=False, label=_('Package'),
     )
     device_id = DynamicModelMultipleChoiceField(
         queryset=Device.objects.all(),
@@ -156,6 +171,9 @@ class ComplianceExemptionFilterForm(NetBoxModelFilterSetForm):
     tag_id = DynamicModelMultipleChoiceField(
         queryset=Tag.objects.all(), required=False, label=_('Tag'),
     )
+    tenant_id = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'),
+    )
     active = forms.NullBooleanField(
         required=False,
         label=_('Currently active'),
@@ -167,6 +185,27 @@ class ComplianceExemptionFilterForm(NetBoxModelFilterSetForm):
 
 class ComplianceResultFilterForm(NetBoxModelFilterSetForm):
     model = ComplianceResult
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag'),
+        FieldSet('device_id', 'measure_id', 'status', 'source', name=_('Result')),
+        FieldSet('timestamp__gte', 'timestamp__lte', name=_('Dates')),
+    )
+    device_id = DynamicModelMultipleChoiceField(
+        queryset=Device.objects.all(),
+        required=False, selector=True, label=_('Device'),
+    )
+    measure_id = DynamicModelMultipleChoiceField(
+        queryset=ComplianceMeasure.objects.all(), required=False, label=_('Measure'),
+    )
+    status = forms.MultipleChoiceField(choices=ComplianceResultStatusChoices, required=False)
+    source = forms.CharField(required=False)
+    timestamp__gte = forms.DateTimeField(required=False, label=_('From'), widget=DatePicker)
+    timestamp__lte = forms.DateTimeField(required=False, label=_('Until'), widget=DatePicker)
+    tag = TagFilterField(model)
+
+
+class ComplianceResultHistoryFilterForm(NetBoxModelFilterSetForm):
+    model = ComplianceResultHistory
     fieldsets = (
         FieldSet('q', 'filter_id', 'tag'),
         FieldSet('device_id', 'measure_id', 'status', 'source', name=_('Result')),
@@ -200,5 +239,22 @@ class ComplianceSnapshotFilterForm(NetBoxModelFilterSetForm):
     compliant = forms.NullBooleanField(
         required=False,
         widget=forms.Select(choices=[('', '---------'), (True, 'Yes'), (False, 'No')]),
+    )
+    tag = TagFilterField(model)
+
+
+class CompliancePackageReportFilterForm(NetBoxModelFilterSetForm):
+    model = CompliancePackageReport
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag'),
+        FieldSet('device_id', 'package_id', name=_('Report')),
+    )
+    device_id = DynamicModelMultipleChoiceField(
+        queryset=Device.objects.all(),
+        required=False, selector=True, label=_('Device'),
+    )
+    package_id = DynamicModelMultipleChoiceField(
+        queryset=CompliancePackage.objects.all(),
+        required=False, selector=True, label=_('Package'),
     )
     tag = TagFilterField(model)

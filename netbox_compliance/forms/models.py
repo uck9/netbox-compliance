@@ -4,11 +4,19 @@ from django.utils.translation import gettext_lazy as _
 from dcim.models import Device, DeviceRole, Platform, Site, SiteGroup
 from extras.models import Tag
 from netbox.forms import NetBoxModelForm
-from utilities.forms.fields import CommentField, DynamicModelChoiceField, JSONField, SlugField
+from tenancy.models import Tenant
+from utilities.forms.fields import (
+    CommentField,
+    DynamicModelChoiceField,
+    DynamicModelMultipleChoiceField,
+    JSONField,
+    SlugField,
+)
 from utilities.forms.rendering import FieldSet
 from utilities.forms.widgets import DatePicker, DateTimePicker
 
 from ..models import (
+    SCOPE_FIELDS,
     ComplianceExemption,
     ComplianceMeasure,
     CompliancePackage,
@@ -23,26 +31,46 @@ __all__ = (
     'CompliancePackageForm',
     'PackageMeasureForm',
     'PackageAssignmentForm',
+    'PackageAssignmentBulkAssignForm',
     'MeasureAssignmentForm',
     'ComplianceExemptionForm',
     'ComplianceResultForm',
 )
 
+# Shows "<name> - <severity code> - <short desc>" instead of just the bare name in every
+# ComplianceMeasure dropdown -- see ComplianceMeasure.dropdown_label. Passed to every `measure`
+# DynamicModelChoiceField below via `context={'label': ...}`, which overrides the widget's
+# default 'display' attribute lookup for just this one field, without touching the model's
+# `__str__`/API `display` (used everywhere else a measure is referenced).
+MEASURE_DROPDOWN_CONTEXT = {'label': 'dropdown_label'}
+
 
 class ComplianceMeasureForm(NetBoxModelForm):
     slug = SlugField(slug_source='name')
     comments = CommentField()
+    value_map = JSONField(
+        required=False,
+        help_text=_('Enum type only: {"key": {"label": ..., "color": "green|orange|red|grey", "credit": 0-100}}'),
+    )
+    required_detail_keys = JSONField(required=False, help_text=_('e.g. ["running", "target"]'))
 
     fieldsets = (
-        FieldSet('name', 'slug', 'description', 'category', 'severity', 'status', 'tags', name=_('Measure')),
+        FieldSet('name', 'slug', 'title', 'description', 'category', 'severity', 'status', 'tags', name=_('Measure')),
+        FieldSet('result_type', 'pass_threshold', 'value_map', name=_('Result Type')),
         FieldSet('max_result_age_days', name=_('Staleness')),
+        FieldSet(
+            'show_on_device_panel', 'panel_display_order', 'display_template', 'required_detail_keys',
+            name=_('Device Panel'),
+        ),
     )
 
     class Meta:
         model = ComplianceMeasure
         fields = (
-            'name', 'slug', 'description', 'category', 'severity',
-            'max_result_age_days', 'status', 'comments', 'tags',
+            'name', 'slug', 'title', 'description', 'category', 'severity',
+            'max_result_age_days', 'status', 'comments', 'result_type',
+            'pass_threshold', 'value_map', 'show_on_device_panel', 'panel_display_order',
+            'display_template', 'required_detail_keys', 'tags',
         )
 
 
@@ -51,16 +79,23 @@ class CompliancePackageForm(NetBoxModelForm):
 
     fieldsets = (
         FieldSet('name', 'slug', 'description', 'status', 'tags', name=_('Package')),
+        FieldSet(
+            'show_on_device_panel', 'panel_display_order', 'amber_threshold', 'red_on_critical_fail',
+            name=_('Device Panel'),
+        ),
     )
 
     class Meta:
         model = CompliancePackage
-        fields = ('name', 'slug', 'description', 'status', 'tags')
+        fields = (
+            'name', 'slug', 'description', 'status', 'show_on_device_panel',
+            'panel_display_order', 'amber_threshold', 'red_on_critical_fail', 'tags',
+        )
 
 
 class PackageMeasureForm(NetBoxModelForm):
     package = DynamicModelChoiceField(queryset=CompliancePackage.objects.all())
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all(), context=MEASURE_DROPDOWN_CONTEXT)
 
     fieldsets = (
         FieldSet('package', 'measure', 'weight', 'required', 'display_order', 'tags', name=_('Package Measure')),
@@ -79,23 +114,92 @@ class PackageAssignmentForm(NetBoxModelForm):
     site_group = DynamicModelChoiceField(queryset=SiteGroup.objects.all(), required=False, label=_('Site Group'))
     platform = DynamicModelChoiceField(queryset=Platform.objects.all(), required=False, label=_('Platform'))
     tag = DynamicModelChoiceField(queryset=Tag.objects.all(), required=False, label=_('Tag'))
+    tenants = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, label=_('Tenants'),
+        help_text=_('Optional: only devices in one of these tenants. Not valid with a device-scoped assignment.'),
+    )
 
     fieldsets = (
         FieldSet('package', 'description', 'tags', name=_('Package Assignment')),
         FieldSet('device', 'device_role', 'site', 'site_group', 'platform', 'tag', name=_('Scope (exactly one)')),
+        FieldSet('tenants', name=_('Narrow scope (optional)')),
     )
 
     class Meta:
         model = PackageAssignment
         fields = (
             'package', 'device', 'device_role', 'site', 'site_group',
-            'platform', 'tag', 'description', 'tags',
+            'platform', 'tag', 'tenants', 'description', 'tags',
         )
+
+    def clean(self):
+        # NetBoxModelForm's clean chain runs through CheckLastUpdatedMixin.clean(),
+        # which returns None (not cleaned_data) on an add and on several other
+        # branches -- so `super().clean()` can't be trusted to hand back the dict.
+        # Call it for its side effects, then read self.cleaned_data directly.
+        super().clean()
+        cleaned_data = self.cleaned_data
+        if cleaned_data.get('tenants') and cleaned_data.get('device'):
+            raise forms.ValidationError({
+                'tenants': _('Tenant narrowing does not apply to a device-scoped assignment.'),
+            })
+        return cleaned_data
+
+
+class PackageAssignmentBulkAssignForm(forms.Form):
+    """
+    Fans a single package out to many scope values in one submission
+    (e.g. several platforms at once), creating one PackageAssignment row
+    per selected value. Selections must all be in the same scope field,
+    per the one-scope-field-per-row invariant PackageAssignment.clean()
+    enforces on each resulting row.
+    """
+    package = DynamicModelChoiceField(queryset=CompliancePackage.objects.all())
+    device = DynamicModelMultipleChoiceField(queryset=Device.objects.all(), required=False, label=_('Devices'))
+    device_role = DynamicModelMultipleChoiceField(queryset=DeviceRole.objects.all(), required=False, label=_('Device Roles'))
+    site = DynamicModelMultipleChoiceField(queryset=Site.objects.all(), required=False, label=_('Sites'))
+    site_group = DynamicModelMultipleChoiceField(queryset=SiteGroup.objects.all(), required=False, label=_('Site Groups'))
+    platform = DynamicModelMultipleChoiceField(queryset=Platform.objects.all(), required=False, label=_('Platforms'))
+    tag = DynamicModelMultipleChoiceField(queryset=Tag.objects.all(), required=False, label=_('Tags'))
+    tenants = DynamicModelMultipleChoiceField(
+        queryset=Tenant.objects.all(), required=False, label=_('Tenants'),
+        help_text=_('Optional: narrow every created assignment to devices in one of these tenants. Not valid with device scope.'),
+    )
+    description = forms.CharField(
+        required=False, widget=forms.Textarea(attrs={'rows': 3}),
+        help_text=_('Applied to every assignment created.'),
+    )
+
+    fieldsets = (
+        FieldSet('package', 'description', name=_('Package')),
+        FieldSet(*SCOPE_FIELDS, name=_('Scope (select values in exactly one field)')),
+        FieldSet('tenants', name=_('Narrow scope (optional)')),
+    )
+
+    def clean(self):
+        super().clean()
+        cleaned_data = self.cleaned_data
+        filled_fields = [field for field in SCOPE_FIELDS if cleaned_data.get(field)]
+        if len(filled_fields) == 0:
+            raise forms.ValidationError(
+                _('Select at least one value in exactly one of: %(fields)s.') % {'fields': ', '.join(SCOPE_FIELDS)}
+            )
+        if len(filled_fields) > 1:
+            raise forms.ValidationError(
+                _('Selections must be in exactly one scope field; found values in: %(fields)s.')
+                % {'fields': ', '.join(filled_fields)}
+            )
+        cleaned_data['scope_field'] = filled_fields[0]
+        if cleaned_data.get('tenants') and filled_fields[0] == 'device':
+            raise forms.ValidationError(
+                _('Tenant narrowing does not apply to a device-scoped assignment.')
+            )
+        return cleaned_data
 
 
 class MeasureAssignmentForm(NetBoxModelForm):
     device = DynamicModelChoiceField(queryset=Device.objects.all(), selector=True, label=_('Device'))
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all(), context=MEASURE_DROPDOWN_CONTEXT)
 
     fieldsets = (
         FieldSet('device', 'measure', 'weight', 'description', 'tags', name=_('Measure Assignment')),
@@ -107,22 +211,32 @@ class MeasureAssignmentForm(NetBoxModelForm):
 
 
 class ComplianceExemptionForm(NetBoxModelForm):
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(
+        queryset=ComplianceMeasure.objects.all(), required=False, context=MEASURE_DROPDOWN_CONTEXT,
+        help_text=_('Exempt one measure. Leave blank if exempting a whole package instead.'),
+    )
+    package = DynamicModelChoiceField(
+        queryset=CompliancePackage.objects.all(), required=False,
+        help_text=_('Exempt every measure in this package for the scope below, regardless of how the '
+                    'package itself got assigned (direct, role, site, platform, ...). Leave blank if '
+                    'exempting a single measure instead.'),
+    )
     device = DynamicModelChoiceField(queryset=Device.objects.all(), required=False, selector=True, label=_('Device'))
     site = DynamicModelChoiceField(queryset=Site.objects.all(), required=False, selector=True, label=_('Site'))
     site_group = DynamicModelChoiceField(queryset=SiteGroup.objects.all(), required=False, label=_('Site Group'))
     tag = DynamicModelChoiceField(queryset=Tag.objects.all(), required=False, label=_('Tag'))
+    tenant = DynamicModelChoiceField(queryset=Tenant.objects.all(), required=False, selector=True, label=_('Tenant'))
 
     fieldsets = (
-        FieldSet('measure', name=_('Measure')),
-        FieldSet('device', 'site', 'site_group', 'tag', name=_('Scope (exactly one)')),
+        FieldSet('measure', 'package', name=_('Measure or Package (exactly one)')),
+        FieldSet('device', 'site', 'site_group', 'tag', 'tenant', name=_('Scope (exactly one)')),
         FieldSet('justification', 'approved_by', 'valid_from', 'valid_until', 'tags', name=_('Approval')),
     )
 
     class Meta:
         model = ComplianceExemption
         fields = (
-            'measure', 'device', 'site', 'site_group', 'tag',
+            'measure', 'package', 'device', 'site', 'site_group', 'tag', 'tenant',
             'justification', 'approved_by', 'valid_from', 'valid_until', 'tags',
         )
         widgets = {
@@ -134,16 +248,16 @@ class ComplianceExemptionForm(NetBoxModelForm):
 
 class ComplianceResultForm(NetBoxModelForm):
     device = DynamicModelChoiceField(queryset=Device.objects.all(), selector=True, label=_('Device'))
-    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all())
+    measure = DynamicModelChoiceField(queryset=ComplianceMeasure.objects.all(), context=MEASURE_DROPDOWN_CONTEXT)
     details = JSONField(required=False)
 
     fieldsets = (
-        FieldSet('device', 'measure', 'status', 'timestamp', 'source', 'details', 'tags', name=_('Result')),
+        FieldSet('device', 'measure', 'status', 'value', 'timestamp', 'source', 'details', 'tags', name=_('Result')),
     )
 
     class Meta:
         model = ComplianceResult
-        fields = ('device', 'measure', 'status', 'timestamp', 'source', 'details', 'tags')
+        fields = ('device', 'measure', 'status', 'value', 'timestamp', 'source', 'details', 'tags')
         widgets = {
             'timestamp': DateTimePicker(),
         }

@@ -1,18 +1,27 @@
+from decimal import Decimal
+
 from django.urls import reverse
 from rest_framework import status
 
-from ..choices import ComplianceMeasureCategoryChoices, ComplianceMeasureSeverityChoices
-from ..models import ComplianceResult, MeasureAssignment
+from ..choices import ComplianceMeasureCategoryChoices, ComplianceMeasureResultTypeChoices, ComplianceMeasureSeverityChoices
+from ..models import ComplianceResult, ComplianceResultHistory, MeasureAssignment, PackageAssignment
 from ..models import ComplianceMeasure
 from .base import ComplianceTestMixin
 from .custom import APITestCase
 
+VALUE_MAP = {
+    'target': {'label': 'Target version', 'color': 'green', 'credit': 100},
+    'upgrade_required': {'label': 'Upgrade required', 'color': 'orange', 'credit': 40},
+}
 
-def make_measure(slug):
+
+def make_measure(slug, result_type=ComplianceMeasureResultTypeChoices.BOOLEAN, **kwargs):
     return ComplianceMeasure.objects.create(
         name=slug, slug=slug,
         category=ComplianceMeasureCategoryChoices.SECURITY,
         severity=ComplianceMeasureSeverityChoices.HIGH,
+        result_type=result_type,
+        **kwargs,
     )
 
 
@@ -35,7 +44,7 @@ class BulkResultIngestTest(ComplianceTestMixin, APITestCase):
             'device': self.device.name,
             'source': 'test-runner',
             'results': [
-                {'measure': self.measure1.slug, 'status': 'pass'},
+                {'measure': self.measure1.slug, 'value': True},
             ],
         }
         response = self.client.post(self._url(), payload, format='json', **self.header)
@@ -43,14 +52,16 @@ class BulkResultIngestTest(ComplianceTestMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(response.data['created'], 1)
         self.assertEqual(response.data['warnings'], [])
-        self.assertEqual(ComplianceResult.objects.filter(device=self.device, measure=self.measure1).count(), 1)
+        result = ComplianceResult.objects.get(device=self.device, measure=self.measure1)
+        self.assertEqual(result.status, 'pass')
+        self.assertEqual(result.value, 'true')
 
     def test_measure_not_in_effective_set_warns_but_still_stores(self):
         payload = {
             'device': self.device.name,
             'source': 'test-runner',
             'results': [
-                {'measure': self.measure2.slug, 'status': 'fail'},
+                {'measure': self.measure2.slug, 'value': False},
             ],
         }
         response = self.client.post(self._url(), payload, format='json', **self.header)
@@ -64,7 +75,7 @@ class BulkResultIngestTest(ComplianceTestMixin, APITestCase):
         payload = {
             'device': 'does-not-exist',
             'source': 'test-runner',
-            'results': [{'measure': self.measure1.slug, 'status': 'pass'}],
+            'results': [{'measure': self.measure1.slug, 'value': True}],
         }
         response = self.client.post(self._url(), payload, format='json', **self.header)
 
@@ -76,8 +87,8 @@ class BulkResultIngestTest(ComplianceTestMixin, APITestCase):
             'device': self.device.name,
             'source': 'test-runner',
             'results': [
-                {'measure': self.measure1.slug, 'status': 'pass'},
-                {'measure': 'does-not-exist', 'status': 'pass'},
+                {'measure': self.measure1.slug, 'value': True},
+                {'measure': 'does-not-exist', 'value': True},
             ],
         }
         response = self.client.post(self._url(), payload, format='json', **self.header)
@@ -92,14 +103,521 @@ class BulkResultIngestTest(ComplianceTestMixin, APITestCase):
         payload = [
             {
                 'device': self.device.name, 'source': 'runner',
-                'results': [{'measure': self.measure1.slug, 'status': 'pass'}],
+                'results': [{'measure': self.measure1.slug, 'value': True}],
             },
             {
                 'device': device2.name, 'source': 'runner',
-                'results': [{'measure': self.measure1.slug, 'status': 'fail'}],
+                'results': [{'measure': self.measure1.slug, 'value': False}],
             },
         ]
         response = self.client.post(self._url(), payload, format='json', **self.header)
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(response.data['created'], 2)
+
+    def test_enum_unknown_key_rejected_atomically(self):
+        enum_measure = make_measure('bulk-enum', result_type=ComplianceMeasureResultTypeChoices.ENUM, value_map=VALUE_MAP)
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': enum_measure.slug, 'value': 'not-a-real-key'}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(ComplianceResult.objects.count(), 0)
+
+    def test_enum_known_key_creates_result_with_derived_status(self):
+        enum_measure = make_measure('bulk-enum-2', result_type=ComplianceMeasureResultTypeChoices.ENUM, value_map=VALUE_MAP)
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': enum_measure.slug, 'value': 'upgrade_required', 'details': {}}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        result = ComplianceResult.objects.get(device=self.device, measure=enum_measure)
+        self.assertEqual(result.status, 'fail')  # credit 40 != 100
+        self.assertEqual(result.value, 'upgrade_required')
+
+    def test_percentage_non_numeric_value_rejected(self):
+        pct_measure = make_measure('bulk-pct', result_type=ComplianceMeasureResultTypeChoices.PERCENTAGE, pass_threshold=Decimal('90.00'))
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': pct_measure.slug, 'value': 'not-a-number'}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(ComplianceResult.objects.count(), 0)
+
+    def test_percentage_value_creates_result_with_derived_status(self):
+        pct_measure = make_measure('bulk-pct-2', result_type=ComplianceMeasureResultTypeChoices.PERCENTAGE, pass_threshold=Decimal('90.00'))
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': pct_measure.slug, 'value': 95.5}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        result = ComplianceResult.objects.get(device=self.device, measure=pct_measure)
+        self.assertEqual(result.status, 'pass')
+
+    def test_boolean_missing_value_rejected(self):
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': self.measure1.slug, 'status': 'pass'}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(ComplianceResult.objects.count(), 0)
+
+    def test_explicit_error_status_accepted_without_value(self):
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': self.measure1.slug, 'status': 'error'}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        result = ComplianceResult.objects.get(device=self.device, measure=self.measure1)
+        self.assertEqual(result.status, 'error')
+        self.assertIsNone(result.value)
+
+    def test_explicit_not_applicable_status_accepted_without_value(self):
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': self.measure1.slug, 'status': 'not_applicable'}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        result = ComplianceResult.objects.get(device=self.device, measure=self.measure1)
+        self.assertEqual(result.status, 'not_applicable')
+
+    def test_status_other_than_error_or_na_rejected_as_explicit_input(self):
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': self.measure1.slug, 'status': 'pass'}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(ComplianceResult.objects.count(), 0)
+
+    def test_required_detail_keys_enforced_missing_key_rejects_batch(self):
+        detail_measure = make_measure(
+            'bulk-details', result_type=ComplianceMeasureResultTypeChoices.ENUM,
+            value_map=VALUE_MAP, required_detail_keys=['running', 'target'],
+        )
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{'measure': detail_measure.slug, 'value': 'target', 'details': {'running': '1.0'}}],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(ComplianceResult.objects.count(), 0)
+
+    def test_required_detail_keys_satisfied_creates_result(self):
+        detail_measure = make_measure(
+            'bulk-details-2', result_type=ComplianceMeasureResultTypeChoices.ENUM,
+            value_map=VALUE_MAP, required_detail_keys=['running', 'target'],
+        )
+        payload = {
+            'device': self.device.name,
+            'source': 'test-runner',
+            'results': [{
+                'measure': detail_measure.slug, 'value': 'target',
+                'details': {'running': '1.0', 'target': '1.0'},
+            }],
+        }
+        response = self.client.post(self._url(), payload, format='json', **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertTrue(ComplianceResult.objects.filter(device=self.device, measure=detail_measure).exists())
+
+
+class ComplianceResultCurrentRowOnlyTest(ComplianceTestMixin, APITestCase):
+    """ComplianceResult now holds at most one row per (device, measure) -- reposting
+    the same pair updates that row in place rather than adding a second one."""
+    model = ComplianceResult
+    user_permissions = ('netbox_compliance.view_complianceresult', 'netbox_compliance.add_complianceresult')
+
+    def test_reposting_same_device_measure_updates_the_existing_row(self):
+        from ..services import record_result
+
+        measure = make_measure('repost-measure')
+        device = self.make_device()
+        older = record_result(device, measure, status='pass', value='true', source='test')
+
+        newer = record_result(device, measure, status='fail', value='false', source='test')
+
+        self.assertEqual(newer.pk, older.pk)  # same row, updated in place
+        self.assertEqual(ComplianceResult.objects.filter(device=device, measure=measure).count(), 1)
+
+        url = reverse('plugins-api:netbox_compliance-api:complianceresult-list')
+        response = self.client.get(url, **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        ids = {row['id'] for row in response.data['results']}
+        self.assertEqual(ids, {newer.pk})
+
+
+class ComplianceResultHistoryTest(ComplianceTestMixin, APITestCase):
+    """Every write to ComplianceResult (via record_result()'s upsert) is mirrored into
+    ComplianceResultHistory by a post_save signal -- see __init__.py."""
+    model = ComplianceResultHistory
+    user_permissions = ('netbox_compliance.view_complianceresulthistory',)
+
+    def test_reposting_same_device_measure_appends_to_history(self):
+        from ..services import record_result
+
+        measure = make_measure('history-measure')
+        device = self.make_device()
+        record_result(device, measure, status='pass', value='true', source='test')
+        record_result(device, measure, status='fail', value='false', source='test')
+
+        entries = ComplianceResultHistory.objects.filter(device=device, measure=measure).order_by('timestamp')
+        self.assertEqual(entries.count(), 2)
+        self.assertEqual([e.status for e in entries], ['pass', 'fail'])
+
+        url = reverse('plugins-api:netbox_compliance-api:complianceresulthistory-list')
+        response = self.client.get(url, **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['count'], 2)
+
+    def test_history_survives_result_deletion(self):
+        from ..services import record_result
+
+        measure = make_measure('history-survives-delete')
+        device = self.make_device()
+        result = record_result(device, measure, status='pass', value='true', source='test')
+
+        result.delete()
+
+        self.assertEqual(ComplianceResultHistory.objects.filter(device=device, measure=measure).count(), 1)
+
+
+class DeviceComplianceStatusAPITest(ComplianceTestMixin, APITestCase):
+    model = ComplianceResult
+    user_permissions = ('netbox_compliance.view_complianceresult', 'dcim.view_device')
+
+    def test_status_endpoint_includes_typed_fields_and_traffic_light(self):
+        from django.utils import timezone
+
+        from ..models import CompliancePackage, PackageAssignment, PackageMeasure
+        from ..choices import CompliancePackageStatusChoices
+
+        measure = make_measure(
+            'status-enum', result_type=ComplianceMeasureResultTypeChoices.ENUM,
+            value_map=VALUE_MAP, display_template='{{ label }}',
+        )
+        package = CompliancePackage.objects.create(name='StatusPkg', slug='statuspkg', status=CompliancePackageStatusChoices.ACTIVE)
+        PackageMeasure.objects.create(package=package, measure=measure, weight=1, required=True)
+        device = self.make_device(site=self.site)
+        PackageAssignment.objects.create(package=package, site=self.site)
+        ComplianceResult.objects.create(
+            device=device, measure=measure, status='fail', value='upgrade_required',
+            timestamp=timezone.now(), source='test',
+        )
+
+        url = reverse('plugins-api:netbox_compliance-api:device-status', kwargs={'pk': device.pk})
+        response = self.client.get(url, **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        package_data = response.data['packages'][0]
+        self.assertIn('traffic_light', package_data)
+        measure_data = package_data['measures'][0]
+        self.assertEqual(measure_data['result_type'], 'enum')
+        self.assertEqual(measure_data['value'], 'upgrade_required')
+        self.assertEqual(measure_data['display_label'], 'Upgrade required')
+        self.assertEqual(measure_data['credit'], 40)
+
+    def test_status_endpoint_display_text_renders_display_template(self):
+        from django.utils import timezone
+
+        from ..models import MeasureAssignment
+
+        measure = make_measure(
+            'status-template', result_type=ComplianceMeasureResultTypeChoices.ENUM,
+            value_map=VALUE_MAP, display_template='{{ details.running }} (target {{ details.target }})',
+        )
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+        ComplianceResult.objects.create(
+            device=device, measure=measure, status='pass', value='target',
+            details={'running': '17.9.4a', 'target': '17.12.3'},
+            timestamp=timezone.now(), source='test',
+        )
+
+        url = reverse('plugins-api:netbox_compliance-api:device-status', kwargs={'pk': device.pk})
+        response = self.client.get(url, **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        measure_data = response.data['direct_measures'][0]
+        self.assertEqual(measure_data['display_text'], '17.9.4a (target 17.12.3)')
+
+
+class DeviceEffectiveMeasuresAPITest(ComplianceTestMixin, APITestCase):
+    model = ComplianceResult
+    user_permissions = ('netbox_compliance.view_complianceresult', 'dcim.view_device')
+
+    def _url(self, device):
+        return reverse('plugins-api:netbox_compliance-api:device-effective-measures', kwargs={'pk': device.pk})
+
+    def test_returns_definition_fields_with_no_result_data(self):
+        from ..models import CompliancePackage, PackageAssignment, PackageMeasure
+        from ..choices import CompliancePackageStatusChoices
+
+        measure = make_measure(
+            'ntp-sync-measure', result_type=ComplianceMeasureResultTypeChoices.BOOLEAN,
+            required_detail_keys=['running'],
+        )
+        package = CompliancePackage.objects.create(
+            name='CorpBaseline', slug='corp-baseline', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+        PackageMeasure.objects.create(package=package, measure=measure, weight=2, required=True)
+        device = self.make_device(site=self.site)
+        PackageAssignment.objects.create(package=package, site=self.site)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['device'], device.pk)
+        row = response.data['measures'][0]
+        self.assertEqual(row['measure'], 'ntp-sync-measure')
+        self.assertEqual(row['result_type'], 'boolean')
+        self.assertEqual(row['required_detail_keys'], ['running'])
+        self.assertEqual(row['weight'], 2)
+        self.assertTrue(row['required'])
+        self.assertEqual(row['source'], ['corp-baseline'])
+        self.assertNotIn('status', row)
+        self.assertNotIn('value', row)
+        self.assertNotIn('result_timestamp', row)
+
+    def test_title_is_exposed_alongside_name(self):
+        from ..models import MeasureAssignment
+
+        measure = make_measure('aaa-004', title='TACACS source-interface bound to Loopback0')
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        row = response.data['measures'][0]
+        self.assertEqual(row['measure_name'], 'aaa-004')
+        self.assertEqual(row['measure_title'], 'TACACS source-interface bound to Loopback0')
+
+    def test_direct_assignment_has_null_source_and_no_package_dependency(self):
+        from ..models import MeasureAssignment
+
+        measure = make_measure('direct-only-measure')
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        row = response.data['measures'][0]
+        self.assertEqual(row['measure'], 'direct-only-measure')
+        self.assertIsNone(row['source'])
+        self.assertTrue(row['required'])
+
+    def test_exempted_measure_is_excluded(self):
+        from ..models import ComplianceExemption, MeasureAssignment
+
+        measure = make_measure('exempted-measure')
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+        ComplianceExemption.objects.create(device=device, measure=measure, justification='not applicable here')
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['measures'], [])
+
+    def test_percentage_measure_exposes_pass_threshold(self):
+        from ..models import MeasureAssignment
+
+        measure = make_measure(
+            'percentage-measure', result_type=ComplianceMeasureResultTypeChoices.PERCENTAGE,
+            pass_threshold=Decimal('90.00'),
+        )
+        device = self.make_device()
+        MeasureAssignment.objects.create(device=device, measure=measure, weight=1)
+
+        response = self.client.get(self._url(device), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        row = response.data['measures'][0]
+        self.assertEqual(row['pass_threshold'], 90.0)
+
+
+class StatusReportAPITest(ComplianceTestMixin, APITestCase):
+    """GET /api/plugins/compliance/reports/status/ -- JSON form of the Package &
+    Test Status Report (reporting.build_by_package / build_by_test)."""
+
+    model = ComplianceResult
+    user_permissions = ('netbox_compliance.view_complianceresult',)
+
+    def setUp(self):
+        super().setUp()
+        from django.utils import timezone
+
+        from ..choices import CompliancePackageStatusChoices
+        from ..models import CompliancePackage, PackageAssignment, PackageMeasure
+
+        self.package = CompliancePackage.objects.create(
+            name='ApiRepPkg', slug='api-rep-pkg', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+        self.crit = make_measure('api-rep-crit')
+        self.crit.severity = ComplianceMeasureSeverityChoices.CRITICAL
+        self.crit.save()
+        self.low = make_measure('api-rep-low')
+        self.low.severity = ComplianceMeasureSeverityChoices.LOW
+        self.low.save()
+        PackageMeasure.objects.create(package=self.package, measure=self.crit, weight=1, required=True)
+        PackageMeasure.objects.create(package=self.package, measure=self.low, weight=1, required=True)
+        PackageAssignment.objects.create(package=self.package, site=self.site)
+
+        self.device = self.make_device(site=self.site)
+        for m in (self.crit, self.low):
+            ComplianceResult.objects.create(
+                device=self.device, measure=m, status='fail',
+                timestamp=timezone.now(), source='test',
+            )
+
+    def _url(self, **params):
+        url = reverse('plugins-api:netbox_compliance-api:status-report')
+        if params:
+            from urllib.parse import urlencode
+            url += '?' + urlencode(params, doseq=True)
+        return url
+
+    def test_by_package_shape(self):
+        response = self.client.get(self._url(tab='by_package', site=self.site.pk), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data['tab'], 'by_package')
+        site = response.data['sites'][0]
+        self.assertEqual(site['site']['id'], self.site.pk)
+        dev = site['devices'][0]
+        self.assertEqual(dev['device']['id'], self.device.pk)
+        self.assertEqual(dev['total_failing'], 2)
+        sevs = {c['severity'] for c in dev['failing_by_severity']}
+        self.assertEqual(sevs, {'critical', 'low'})
+        row = dev['rows'][0]
+        self.assertEqual(row['package']['slug'], self.package.slug)
+        self.assertIn('traffic_light', row)
+
+    def test_by_test_shape_and_status(self):
+        response = self.client.get(self._url(tab='by_test', site=self.site.pk), **self.header)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        rows = response.data['sites'][0]['devices'][0]['rows']
+        slugs = {r['measure']['slug']: r for r in rows}
+        self.assertEqual(slugs[self.crit.slug]['status'], 'fail')
+        self.assertEqual(slugs[self.crit.slug]['measure']['severity'], 'critical')
+
+    def test_severity_filter_narrows_by_test_rows(self):
+        response = self.client.get(
+            self._url(tab='by_test', site=self.site.pk, severity='critical'), **self.header,
+        )
+
+        rows = response.data['sites'][0]['devices'][0]['rows']
+        slugs = {r['measure']['slug'] for r in rows}
+        self.assertEqual(slugs, {self.crit.slug})
+        self.assertEqual(response.data['filters']['severity'], ['critical'])
+
+    def test_unevaluated_device_has_null_score(self):
+        other = self.make_device(name='api-rep-unevaluated', site=self.site)
+
+        response = self.client.get(self._url(tab='by_package', site=self.site.pk), **self.header)
+
+        by_name = {d['device']['name']: d for d in response.data['sites'][0]['devices']}
+        self.assertIsNone(by_name[other.name]['score'])
+        self.assertFalse(by_name[other.name]['evaluated'])
+
+    def test_invalid_tab_is_400(self):
+        response = self.client.get(self._url(tab='nonsense'), **self.header)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unauthenticated_is_denied(self):
+        response = self.client.get(self._url())  # no auth header
+        self.assertIn(response.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+
+class PackageAssignmentTenantsAPITest(ComplianceTestMixin, APITestCase):
+    model = PackageAssignment
+    user_permissions = (
+        'netbox_compliance.view_packageassignment',
+        'netbox_compliance.add_packageassignment',
+    )
+
+    def setUp(self):
+        super().setUp()
+        from tenancy.models import Tenant
+
+        from ..models import CompliancePackage
+        from ..choices import CompliancePackageStatusChoices
+
+        self.package = CompliancePackage.objects.create(
+            name='ApiPkg', slug='apipkg', status=CompliancePackageStatusChoices.ACTIVE,
+        )
+        self.tenant_a = Tenant.objects.create(name='ApiTenantA', slug='api-tenant-a')
+        self.tenant_b = Tenant.objects.create(name='ApiTenantB', slug='api-tenant-b')
+
+    def test_create_and_read_back_multiple_tenants(self):
+        response = self.client.post(
+            self._get_list_url(),
+            {
+                'package': self.package.pk,
+                'site': self.site.pk,
+                'tenants': [self.tenant_a.pk, self.tenant_b.pk],
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(set(response.data['tenants']), {self.tenant_a.pk, self.tenant_b.pk})
+
+        assignment = PackageAssignment.objects.get(pk=response.data['id'])
+        self.assertEqual(
+            set(assignment.tenants.values_list('pk', flat=True)),
+            {self.tenant_a.pk, self.tenant_b.pk},
+        )
+
+        detail = self.client.get(self._get_detail_url(assignment), **self.header)
+        self.assertEqual(
+            set(detail.data['tenant_names']),
+            {self.tenant_a.name, self.tenant_b.name},
+        )
+
+    def test_tenants_with_device_scope_is_rejected(self):
+        device = self.make_device(site=self.site)
+        response = self.client.post(
+            self._get_list_url(),
+            {
+                'package': self.package.pk,
+                'device': device.pk,
+                'tenants': [self.tenant_a.pk],
+            },
+            format='json',
+            **self.header,
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST, response.data)
+        self.assertIn('tenants', response.data)

@@ -33,10 +33,29 @@ urlpatterns = [
     path('results/', include(get_model_urls('netbox_compliance', 'complianceresult', detail=False))),
     path('results/<int:pk>/', include(get_model_urls('netbox_compliance', 'complianceresult'))),
 
+    # ComplianceResultHistory (read-only + delete)
+    path('result-history/', include(get_model_urls('netbox_compliance', 'complianceresulthistory', detail=False))),
+    path('result-history/<int:pk>/', include(get_model_urls('netbox_compliance', 'complianceresulthistory'))),
+
     # ComplianceSnapshot (read-only + delete)
     path('snapshots/', include(get_model_urls('netbox_compliance', 'compliancesnapshot', detail=False))),
     path('snapshots/<int:pk>/', include(get_model_urls('netbox_compliance', 'compliancesnapshot'))),
 
+    # CompliancePackageReport (read-only + delete)
+    path('package-reports/', include(get_model_urls('netbox_compliance', 'compliancepackagereport', detail=False))),
+    path('package-reports/<int:pk>/', include(get_model_urls('netbox_compliance', 'compliancepackagereport'))),
+    path(
+        'package-reports/<int:pk>/raw/',
+        views.CompliancePackageReportRawView.as_view(),
+        name='compliancepackagereport_raw',
+    ),
+
     # Monthly report
     path('reports/', views.MonthlyReportView.as_view(), name='monthly_report'),
+
+    # Package / test status report
+    path('reports/status/', views.PackageTestStatusReportView.as_view(), name='status_report'),
+
+    # Measure adherence trend report
+    path('reports/trend/', views.MeasureAdherenceTrendView.as_view(), name='measure_trend_report'),
 ]

@@ -1,0 +1,62 @@
+{% extends 'generic/object.html' %}
+{% load plugins %}
+
+{% block content %}
+  <div class="row mb-3">
+    <div class="col col-md-6">
+      <div class="card">
+        <h5 class="card-header">Package Report</h5>
+        <table class="table table-hover attr-table">
+          <tr>
+            <th scope="row">Device</th>
+            <td>
+              {% if object.device %}
+                <a href="{{ object.device.get_absolute_url }}">{{ object.device_name }}</a>
+              {% else %}
+                {{ object.device_name }} <span class="text-muted">(device deleted)</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">Package</th>
+            <td>
+              {% if object.package %}
+                <a href="{{ object.package.get_absolute_url }}">{{ object.package.name }}</a>
+              {% else %}
+                {{ object.package_slug }} <span class="text-muted">(package deleted)</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">Source</th>
+            <td>{{ object.source|placeholder }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Timestamp</th>
+            <td>{{ object.timestamp }}</td>
+          </tr>
+          <tr>
+            <th scope="row">Raw report</th>
+            <td><a href="{{ object.get_raw_url }}" target="_blank">Open in new tab</a></td>
+          </tr>
+        </table>
+      </div>
+      {% include 'inc/panels/tags.html' %}
+      {% plugin_left_page object %}
+    </div>
+    <div class="col col-md-6">
+      {% plugin_right_page object %}
+    </div>
+  </div>
+  <div class="row mb-3">
+    <div class="col col-md-12">
+      <div class="card">
+        <h5 class="card-header">Report</h5>
+        <div class="card-body p-0">
+          <iframe src="{{ object.get_raw_url }}" style="width:100%; height:75vh; border:0;"></iframe>
+        </div>
+      </div>
+      {% plugin_full_width_page object %}
+    </div>
+  </div>
+{% endblock content %}

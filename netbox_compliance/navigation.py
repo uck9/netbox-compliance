@@ -48,6 +48,12 @@ package_assignment_buttons = [
         icon_class='mdi mdi-plus-thick',
         permissions=['netbox_compliance.add_packageassignment'],
     ),
+    PluginMenuButton(
+        link='plugins:netbox_compliance:packageassignment_bulk_assign',
+        title='Bulk Assign',
+        icon_class='mdi mdi-plus-box-multiple',
+        permissions=['netbox_compliance.add_packageassignment'],
+    ),
 ]
 
 measure_assignment_buttons = [
@@ -107,13 +113,33 @@ results_items = (
         permissions=['netbox_compliance.view_complianceresult'],
     ),
     PluginMenuItem(
+        link='plugins:netbox_compliance:complianceresulthistory_list',
+        link_text='Result History',
+        permissions=['netbox_compliance.view_complianceresulthistory'],
+    ),
+    PluginMenuItem(
         link='plugins:netbox_compliance:compliancesnapshot_list',
         link_text='Snapshots',
         permissions=['netbox_compliance.view_compliancesnapshot'],
     ),
     PluginMenuItem(
+        link='plugins:netbox_compliance:compliancepackagereport_list',
+        link_text='Package Reports',
+        permissions=['netbox_compliance.view_compliancepackagereport'],
+    ),
+    PluginMenuItem(
         link='plugins:netbox_compliance:monthly_report',
         link_text='Monthly Report',
+        permissions=['netbox_compliance.view_compliancesnapshot'],
+    ),
+    PluginMenuItem(
+        link='plugins:netbox_compliance:status_report',
+        link_text='Package & Test Status Report',
+        permissions=['netbox_compliance.view_complianceresult'],
+    ),
+    PluginMenuItem(
+        link='plugins:netbox_compliance:measure_trend_report',
+        link_text='Measure Adherence Trend',
         permissions=['netbox_compliance.view_compliancesnapshot'],
     ),
 )

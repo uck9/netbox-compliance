@@ -9,7 +9,23 @@
         <table class="table table-hover attr-table">
           <tr>
             <th scope="row">Measure</th>
-            <td><a href="{{ object.measure.get_absolute_url }}">{{ object.measure }}</a></td>
+            <td>
+              {% if object.measure %}
+                <a href="{{ object.measure.get_absolute_url }}">{{ object.measure }}</a>
+              {% else %}
+                <span class="text-muted">&mdash;</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th scope="row">Package</th>
+            <td>
+              {% if object.package %}
+                <a href="{{ object.package.get_absolute_url }}">{{ object.package }}</a> (every measure exempted)
+              {% else %}
+                <span class="text-muted">&mdash;</span>
+              {% endif %}
+            </td>
           </tr>
           <tr>
             <th scope="row">Scope</th>
@@ -18,6 +34,7 @@
               {% if object.site %}Site: <a href="{{ object.site.get_absolute_url }}">{{ object.site }}</a>{% endif %}
               {% if object.site_group %}Site Group: <a href="{{ object.site_group.get_absolute_url }}">{{ object.site_group }}</a>{% endif %}
               {% if object.tag %}Tag: {% badge object.tag %}{% endif %}
+              {% if object.tenant %}Tenant: <a href="{{ object.tenant.get_absolute_url }}">{{ object.tenant }}</a>{% endif %}
             </td>
           </tr>
           <tr>

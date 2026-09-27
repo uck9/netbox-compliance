@@ -4,13 +4,16 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from netbox.plugins import get_plugin_config
-from netbox_compliance.models import ComplianceResult, ComplianceSnapshot
+from netbox_compliance.models import ComplianceResultHistory, ComplianceSnapshot
 
 
 class Command(BaseCommand):
     help = (
-        'Delete raw compliance results older than --keep-days that fall within an '
-        'already-snapshotted period (results not yet captured in a snapshot are never pruned).'
+        'Delete ComplianceResultHistory entries older than --keep-days that fall within an '
+        'already-snapshotted period (entries not yet captured in a snapshot are never pruned). '
+        'ComplianceResult itself is never touched -- it only ever holds the current result per '
+        'device/measure (one row, kept up to date in place), not a growing history, so there is '
+        'nothing there to prune by age.'
     )
 
     def add_arguments(self, parser):
@@ -23,7 +26,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--dry-run',
             action='store_true',
-            help='Report how many results would be deleted without deleting them.',
+            help='Report how many history entries would be deleted without deleting them.',
         )
 
     def handle(self, *args, **options):
@@ -36,15 +39,20 @@ class Command(BaseCommand):
             ComplianceSnapshot.objects.exclude(device__isnull=True).values_list('device_id', 'period')
         )
 
+        old_entries = ComplianceResultHistory.objects.filter(timestamp__lt=cutoff).only('id', 'device_id', 'timestamp')
         to_delete_ids = [
-            result.pk for result in ComplianceResult.objects.filter(timestamp__lt=cutoff).only('id', 'device_id', 'timestamp')
-            if (result.device_id, result.timestamp.date().replace(day=1)) in snapshotted_periods
+            entry.pk for entry in old_entries
+            # device_id is None means the device itself has since been deleted (SET_NULL) --
+            # no live device left to protect and no future snapshot will ever cover it, so age
+            # alone is enough. Otherwise, same rule as before: only prune once a snapshot has
+            # already captured that device+period.
+            if entry.device_id is None or (entry.device_id, entry.timestamp.date().replace(day=1)) in snapshotted_periods
         ]
         count = len(to_delete_ids)
 
         if options['dry_run']:
-            self.stdout.write(f'Would delete {count} compliance results older than {keep_days} days (dry run).')
+            self.stdout.write(f'Would delete {count} compliance result history entries older than {keep_days} days (dry run).')
             return
 
-        ComplianceResult.objects.filter(pk__in=to_delete_ids).delete()
-        self.stdout.write(self.style.SUCCESS(f'Deleted {count} compliance results older than {keep_days} days.'))
+        ComplianceResultHistory.objects.filter(pk__in=to_delete_ids).delete()
+        self.stdout.write(self.style.SUCCESS(f'Deleted {count} compliance result history entries older than {keep_days} days.'))

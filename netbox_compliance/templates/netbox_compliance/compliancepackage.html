@@ -31,7 +31,9 @@
           </tr>
           <tr>
             <th scope="row">Devices in Scope</th>
-            <td>{{ device_count }}</td>
+            <td>
+              <a href="{% url 'plugins:netbox_compliance:compliancepackage_devices' pk=object.pk %}">{{ device_count }}</a>
+            </td>
           </tr>
         </table>
       </div>

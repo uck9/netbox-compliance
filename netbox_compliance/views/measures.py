@@ -1,5 +1,10 @@
 from django.db.models import Count
 
+from dcim.filtersets import DeviceFilterSet
+from dcim.forms import DeviceFilterForm
+from dcim.models import Device
+from dcim.tables import DeviceTable
+from netbox.object_actions import AddObject, BulkDelete, BulkExport, DeleteObject, EditObject
 from netbox.views.generic import (
     BulkDeleteView,
     ObjectChildrenView,
@@ -11,6 +16,7 @@ from netbox.views.generic import (
 from utilities.views import ViewTab, register_model_view
 
 from .. import filtersets, forms, models, tables
+from ..services import devices_for_package
 
 __all__ = (
     'ComplianceMeasureListView',
@@ -24,6 +30,7 @@ __all__ = (
     'CompliancePackageDeleteView',
     'CompliancePackageBulkDeleteView',
     'CompliancePackageMeasuresView',
+    'CompliancePackageDevicesView',
     'PackageMeasureListView',
     'PackageMeasureView',
     'PackageMeasureEditView',
@@ -90,29 +97,8 @@ class CompliancePackageView(ObjectView):
     queryset = models.CompliancePackage.objects.all()
 
     def get_extra_context(self, request, instance):
-        device_count = 0
         try:
-            from dcim.models import Device
-
-            device_ids = set()
-            for assignment in instance.assignments.all():
-                qs = Device.objects.all()
-                if assignment.device_id:
-                    qs = qs.filter(pk=assignment.device_id)
-                elif assignment.device_role_id:
-                    qs = qs.filter(role_id=assignment.device_role_id)
-                elif assignment.site_id:
-                    qs = qs.filter(site_id=assignment.site_id)
-                elif assignment.site_group_id:
-                    qs = qs.filter(site__group_id=assignment.site_group_id)
-                elif assignment.platform_id:
-                    qs = qs.filter(platform_id=assignment.platform_id)
-                elif assignment.tag_id:
-                    qs = qs.filter(tags=assignment.tag_id)
-                else:
-                    continue
-                device_ids.update(qs.values_list('pk', flat=True))
-            device_count = len(device_ids)
+            device_count = devices_for_package(instance).count()
         except Exception:
             device_count = 0
 
@@ -149,20 +135,45 @@ class CompliancePackageMeasuresView(ObjectChildrenView):
     child_model = models.PackageMeasure
     table = tables.PackageMeasureTable
     filterset = filtersets.PackageMeasureFilterSet
-    actions = {
-        'add': {'add'},
-        'edit': {'change'},
-        'delete': {'delete'},
-        'bulk_delete': {'delete'},
-        'export': {'view'},
-    }
+    actions = (
+        AddObject,
+        EditObject,
+        DeleteObject,
+        BulkDelete,
+        BulkExport,
+    )
     tab = ViewTab(
         label='Measures',
         badge=lambda obj: models.PackageMeasure.objects.filter(package=obj).count(),
     )
 
     def get_children(self, request, parent):
-        return self.child_model.objects.filter(package=parent).order_by('display_order', 'measure__name')
+        return (
+            self.child_model.objects.filter(package=parent)
+            .select_related('measure')
+            .order_by('display_order', 'measure__name')
+        )
+
+
+@register_model_view(models.CompliancePackage, name='devices')
+class CompliancePackageDevicesView(ObjectChildrenView):
+    """Every device currently in this package's scope (see `devices_for_package` -- the union of
+    all its PackageAssignment rows, platform-hierarchy-aware, minus any device covered by a
+    currently-active package-level exemption for this package). View-only: devices aren't
+    created/edited/deleted from a compliance package's context."""
+    queryset = models.CompliancePackage.objects.all()
+    child_model = Device
+    table = DeviceTable
+    filterset = DeviceFilterSet
+    filterset_form = DeviceFilterForm
+    actions = (BulkExport,)
+    tab = ViewTab(
+        label='Devices',
+        badge=lambda obj: devices_for_package(obj).count(),
+    )
+
+    def get_children(self, request, parent):
+        return devices_for_package(parent)
 
 
 #
