@@ -1,3 +1,4 @@
+from netbox.object_actions import BulkDelete, BulkExport
 from netbox.views.generic import (
     BulkDeleteView,
     ObjectDeleteView,
@@ -70,10 +71,10 @@ class ComplianceResultHistoryListView(ObjectListView):
     table = tables.ComplianceResultHistoryTable
     filterset = filtersets.ComplianceResultHistoryFilterSet
     filterset_form = forms.ComplianceResultHistoryFilterForm
-    actions = {
-        'export': {'view'},
-        'bulk_delete': {'delete'},
-    }
+    actions = (
+        BulkExport,
+        BulkDelete,
+    )
 
 
 @register_model_view(models.ComplianceResultHistory)

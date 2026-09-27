@@ -4,6 +4,7 @@ from dcim.filtersets import DeviceFilterSet
 from dcim.forms import DeviceFilterForm
 from dcim.models import Device
 from dcim.tables import DeviceTable
+from netbox.object_actions import AddObject, BulkDelete, BulkExport, DeleteObject, EditObject
 from netbox.views.generic import (
     BulkDeleteView,
     ObjectChildrenView,
@@ -134,13 +135,13 @@ class CompliancePackageMeasuresView(ObjectChildrenView):
     child_model = models.PackageMeasure
     table = tables.PackageMeasureTable
     filterset = filtersets.PackageMeasureFilterSet
-    actions = {
-        'add': {'add'},
-        'edit': {'change'},
-        'delete': {'delete'},
-        'bulk_delete': {'delete'},
-        'export': {'view'},
-    }
+    actions = (
+        AddObject,
+        EditObject,
+        DeleteObject,
+        BulkDelete,
+        BulkExport,
+    )
     tab = ViewTab(
         label='Measures',
         badge=lambda obj: models.PackageMeasure.objects.filter(package=obj).count(),
@@ -165,7 +166,7 @@ class CompliancePackageDevicesView(ObjectChildrenView):
     table = DeviceTable
     filterset = DeviceFilterSet
     filterset_form = DeviceFilterForm
-    actions = {'export': {'view'}}
+    actions = (BulkExport,)
     tab = ViewTab(
         label='Devices',
         badge=lambda obj: devices_for_package(obj).count(),

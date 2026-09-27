@@ -1,6 +1,7 @@
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.views import View
+from netbox.object_actions import BulkDelete, BulkExport
 from netbox.views.generic import BulkDeleteView, ObjectDeleteView, ObjectListView, ObjectView
 from utilities.views import register_model_view
 
@@ -21,10 +22,10 @@ class CompliancePackageReportListView(ObjectListView):
     table = tables.CompliancePackageReportTable
     filterset = filtersets.CompliancePackageReportFilterSet
     filterset_form = forms.CompliancePackageReportFilterForm
-    actions = {
-        'export': {'view'},
-        'bulk_delete': {'delete'},
-    }
+    actions = (
+        BulkExport,
+        BulkDelete,
+    )
 
 
 @register_model_view(models.CompliancePackageReport)
